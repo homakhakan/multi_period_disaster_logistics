@@ -1,5 +1,6 @@
 from input import ModelSetup
 from model import OptimizationModel
+from output import *
 
 # Create an instance of the ModelSetup class
 model_setup = ModelSetup()
@@ -66,3 +67,5 @@ optimization_model.optimize()
 
 # Get results
 optimization_model.get_results()
+
+print("Code execution completed successfully.")
