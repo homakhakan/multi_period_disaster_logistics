@@ -2,6 +2,8 @@ from input import ModelSetup
 from model import OptimizationModel
 from output import *
 
+print("This is just a test")
+
 # Create an instance of the ModelSetup class
 model_setup = ModelSetup()
 
