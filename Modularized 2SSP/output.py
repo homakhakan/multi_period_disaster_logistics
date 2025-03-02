@@ -67,3 +67,11 @@ def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, output
 
     print(f"\nMVP summary results stored in {output_filename}")
 
+class TwoStageSPModel:
+    def __init__(self, network_processor, demand_processor, num_sce):
+        self.network_processor = network_processor  # Store network data
+        self.demand_processor = demand_processor  # Store demand data
+        self.num_sce = num_sce  # Store the number of scenarios
+
+        # Initialize the Gurobi Model
+        self.model = gp.Model("Two-Stage Stochastic Programming Model")

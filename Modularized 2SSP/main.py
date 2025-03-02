@@ -5,27 +5,26 @@ import numpy as np
 import time
 from demand_data import DemandData
 from network_data import NetworkData
-from model import create_ext, master_problem, optimality_sub, feasibility_sub, create_mvp, dvs_mvp, cons_mvp, obj_mvp, compute_mvp_objective
-from method import benders
+from model import create_ext
+#from method import benders
 import output
 
 if __name__ == "__main__":
     # Define parameters
-    num_sce = 10
+    num_sce = 5
     instance_version = "original"
     tperiod = 12
     thetaLB = 0
     eps = 1e-4
 
-    # Create an instance of the DemandData class
-    demand_processor = DemandData(num_sce, instance_version)
-    # Now call the methods using this instance
-    scenario_data = demand_processor.generate_scenario_data()
-    demand_processor.load_demand_data(scenario_data["demand_file"], scenario_data["sheet_names"])
-    # Extract `P` from `scenario_data`
-    P = scenario_data["P"]
-    print("Sample demand data for location 5, time 2, scenario 0:", demand_processor.d_its[(7, 2, 3)])
-    print("Sample demand data for location 6, time 2, scenario 0:", demand_processor.d_its[(1, 0, 1)])
+    demand_processor = DemandData(num_sce, instance_version) # Create an instance of the DemandData class
+    demand_processor.generate_scenario_data() # Now call the methods using this instance
+    demand_processor.load_demand_data()
+    # Print the output
+    print(f"Number of scenarios: {demand_processor.num_sce}")
+    print(f"Generated sheet names: {demand_processor.sheet_names}")
+    print("Sample demand data for location 7, time 2, scenario 3:", demand_processor.d_its[(7, 2, 3)])
+    print("Sample demand data for location 1, time 0, scenario 1:", demand_processor.d_its[(1, 0, 1)])
 
     # Compute and load expected demand for mvp
     output_demand_file = "expected_demand.xlsx"
@@ -37,26 +36,24 @@ if __name__ == "__main__":
     print("Sample demand data for location 7, time 2:", d_it[(7, 2)])
     print("Sample demand data for location 36, time 11:", d_it[(36, 11)])
 
-    network_data = NetworkData(instance_version, tperiod)
-    sets = network_data.define_sets()
-    parameters = network_data.define_parameters()
-    # Add `P` to `parameters` so it can be used in the model
-    parameters["P"] = P
+    network_processor = NetworkData(instance_version, tperiod) # Create an instance of the NetworkData class
+    network_processor.define_sets() # Now call the methods using this instance
+    network_processor.define_parameters()
     # Print the output
-    print(f"\nAll counties: {sets['C']}")
-    print(f"All locations: {sets['V']}")
-    print(f"Warehouse/Supplier locations: {len(sets['V0'])}, {sets['V0']}")
-    print(f"Shelter locations: {len(sets['V1'])}, {sets['V1']}")
-    print(f"RSA locations: {len(sets['V2'])}, {sets['V2']}")
-    print(f"PoD locations: {len(sets['V3'])}, {sets['V3']}")
-    print(f"All resources: {sets['R']}")
-    print(f"Time periods: {sets['T']}")
-    print(f"Time Before Landfall: {sets['T_Bef']}")
-    print(f"Time After Landfall: {sets['T_Aft']}")
+    print(f"\nAll counties: {network_processor.C}")
+    print(f"All locations: {network_processor.V}")
+    print(f"Warehouse/Supplier locations: {len(network_processor.V0)}, {network_processor.V0}")
+    print(f"Shelter locations: {len(network_processor.V1)}, {network_processor.V1}")
+    print(f"RSA locations: {len(network_processor.V2)}, {network_processor.V2}")
+    print(f"PoD locations: {len(network_processor.V3)}, {network_processor.V3}")
+    print(f"All resources: {network_processor.R}")
+    print(f"Time periods: {network_processor.T}")
+    print(f"Time Before Landfall: {network_processor.T_Bef}")
+    print(f"Time After Landfall: {network_processor.T_Aft}")
 
     start_time_ext = time.time()
     # Create and Solve the Extended Formulation Model
-    model = create_ext(sets, parameters, d_its, num_sce)
+    model = create_ext(network_processor, demand_processor, num_sce)
     model.optimize()
 
     end_time_ext = time.time()
@@ -73,7 +70,7 @@ if __name__ == "__main__":
     # Print Execution Time
     print(f"\nTotal Execution Time for extended model: {total_time_ext:.2f} seconds")
 
-    
+    """
     # start_time_benders = time.time()
     master_model, I, theta = master_problem(sets, parameters, thetaLB)
 
@@ -138,3 +135,4 @@ if __name__ == "__main__":
     total_time_mvp = end_time_mvp - start_time_mvp
     print(f"Total Execution Time for mvp: {end_time_mvp - start_time_mvp:.2f} seconds")
     output.mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, output_filename="mvp_results.xlsx")
+    """

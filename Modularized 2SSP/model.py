@@ -4,25 +4,30 @@ import pandas as pd
 import numpy as np
 
 ### Extended
-def create_ext(sets, parameters, d_its, num_sce):
+
+
+def create_ext(network_processor, demand_processor, num_sce):
 
     # 🔹 Initialize the Gurobi Model
     m = gp.Model("Two-Stage Stochastic Programming Model")
 
     # 🔹 Define Decision Variables
-    I, U, S, f = dvs_ext(m, sets, d_its, num_sce)
+    I, U, S, f = dvs_ext(m, network_processor, num_sce)
 
     # 🔹 Define Constraints
-    cons_ext(m, sets, parameters, d_its, I, U, S, f, num_sce)
+    cons_ext(m, network_processor, demand_processor, I, U, S, f, num_sce)
 
     # 🔹 Define Objective Function
-    obj_ext(m, sets, parameters, I, U, S, f)
+    obj_ext(m, network_processor, demand_processor, I, U, S, f)
 
     return m  # Returns the complete model
 
-def dvs_ext(m, sets, d_its, num_sce):
+def dvs_ext(m, network_processor, num_sce):
 
-    V, R, T, A = sets["V"], sets["R"], sets["T"], sets["A"]
+    V = network_processor.V
+    R = network_processor.R
+    T = network_processor.T
+    A = network_processor.A
     sce = range(num_sce)  # Number of scenarios
 
     # I: Inventory of commodity r at node i at the start of time period t
@@ -60,10 +65,22 @@ def dvs_ext(m, sets, d_its, num_sce):
     m.update()
     return I, U, S, f
 
-def cons_ext(m, sets, parameters, d_its, I, U, S, f, num_sce):
+def cons_ext(m, network_processor, demand_processor, I, U, S, f, num_sce):
 
-    V, V0, V1, V3, R, T, T_Bef, A = sets["V"], sets["V0"], sets["V1"], sets["V3"], sets["R"], sets["T"], sets["T_Bef"], sets["A"]
-    K_ijt, w_r, I_ir0, g_shelter, g_pod, t_ijt = parameters["K_ijt"], parameters["w_r"], parameters["I_ir0"], parameters["g_shelter"], parameters["g_pod"], parameters["t_ijt"]
+    V = network_processor.V
+    V0 = network_processor.V0
+    V1 = network_processor.V1
+    V3 = network_processor.V3
+    R = network_processor.R
+    T = network_processor.T
+    T_Bef = network_processor.T_Bef
+    A = network_processor.A
+    K_ijt = network_processor.K_ijt
+    w_r = network_processor.w_r
+    I_ir0 = network_processor.I_ir0
+    g_shelter = network_processor.g_shelter
+    g_pod = network_processor.g_pod
+    t_ijt = network_processor.t_ijt
     sce = range(num_sce)  # Number of scenarios
 
     # Add constraints for the lower bound of inventory at warehouses (V0)
@@ -108,9 +125,6 @@ def cons_ext(m, sets, parameters, d_its, I, U, S, f, num_sce):
                     I[i, r, t] >= I[i, r, t-1],
                     name=f"inventory_increase_pod_{i}_{r}_{t}")
     
-    m.update()  # Ensure the model is updated with the latest constraints
-    #m.write("model_constraints.lp")
-    
     #Starting Value of I[t=0]
     for i in range(V):
         for r in range(R):
@@ -120,13 +134,13 @@ def cons_ext(m, sets, parameters, d_its, I, U, S, f, num_sce):
     for i in range(V):
         for t in range(1, T):
             for s in sce:
-                m.addConstr(U[i, t, s] == U[i, t-1, s] - S[i, t, s] + d_its[(i, t, s)], 
+                m.addConstr(U[i, t, s] == U[i, t-1, s] - S[i, t, s] + demand_processor.d_its[(i, t, s)], 
                             name="DemandShortageUpdate_%s_%s_%s" % (i, t, s))
     
     # Initial demand shortage for all locations and scenarios at time period t=0
     for i in range(V):
         for s in sce:
-            m.addConstr(U[i, 0, s] == d_its[(i, 0, s)], name="InitialDemandShortage_%s_%s" % (i, s))
+            m.addConstr(U[i, 0, s] == demand_processor.d_its[(i, 0, s)], name="InitialDemandShortage_%s_%s" % (i, s))
     
     # Inventory update constraint for all locations, commodities, time periods (except last), and scenarios
     for i in range(V):
@@ -171,26 +185,34 @@ def cons_ext(m, sets, parameters, d_its, I, U, S, f, num_sce):
     
     m.update()
 
-def obj_ext(m, sets, parameters, I, U, S, f):
+def obj_ext(m, network_processor, demand_processor, I, U, S, f):
 
-    P, p_i, cost_ir, m_ij = parameters["P"], parameters["p_i"], parameters["cost_ir"], parameters["m_ij"]
+    P = demand_processor.P
+    p_i = network_processor.p_i
+    cost_ir = network_processor.cost_ir
+    m_ij = network_processor.m_ij
+    V = network_processor.V
+    V0 = network_processor.V0
+    R = network_processor.R
+    T = network_processor.T
+    A = network_processor.A
     sce = range(len(P))
-    # Convert T and R to ranges before using them in loops
-    T_range = range(sets["T"]) if isinstance(sets["T"], int) else sets["T"]
-    R_range = range(sets["R"]) if isinstance(sets["R"], int) else sets["R"]
-    V_range = range(sets["V"]) if isinstance(sets["V"], int) else sets["V"]
+    # # Convert T and R to ranges before using them in loops
+    # T_range = range(sets["T"]) if isinstance(sets["T"], int) else sets["T"]
+    # R_range = range(sets["R"]) if isinstance(sets["R"], int) else sets["R"]
+    # V_range = range(sets["V"]) if isinstance(sets["V"], int) else sets["V"]
 
     objective = gp.quicksum(
         P[s] * (
             gp.quicksum(
-                gp.quicksum(p_i[i] * U[i, t, s] for i in V_range) for t in T_range
+                gp.quicksum(p_i[i] * U[i, t, s] for i in range(V)) for t in range(T)
             ) +
             gp.quicksum(
                 gp.quicksum(
-                    gp.quicksum(cost_ir[i][r] * f[i, j, r, t, s] for i in sets["V0"] for j in V_range if (i, j) in sets["A"]) +
-                    gp.quicksum(m_ij[i][j] * f[i, j, r, t, s] for i in V_range for j in V_range if (i, j) in sets["A"])
-                    for r in R_range
-                ) for t in T_range
+                    gp.quicksum(cost_ir[i][r] * f[i, j, r, t, s] for i in V0 for j in range(V) if (i, j) in A) +
+                    gp.quicksum(m_ij[i][j] * f[i, j, r, t, s] for i in range(V) for j in range(V) if (i, j) in A)
+                    for r in range(R)
+                ) for t in range(T)
             )
         ) for s in sce
     )
@@ -198,6 +220,7 @@ def obj_ext(m, sets, parameters, I, U, S, f):
     m.setObjective(objective, GRB.MINIMIZE)
     m.update()
 
+"""
 ### Benders
 def master_problem(sets, parameters, thetaLB):
     # Extract required sets and parameters
@@ -651,3 +674,5 @@ def compute_mvp_objective(sets, parameters, d_its, I_mvp_values, sub_opt, pi_opt
     mvpobj /= len(sce)
 
     return mvpobj
+
+"""
