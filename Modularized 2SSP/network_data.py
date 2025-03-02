@@ -4,10 +4,7 @@ import math
 
 class NetworkData:
     def __init__(self, instance_version, tperiod):
-        """
-        Initialize the NetworkData class with instance_version and tperiod.
-        Load all required datasets at the start.
-        """
+   
         self.instance_version = instance_version
         self.tperiod = tperiod
 
@@ -26,9 +23,7 @@ class NetworkData:
         self.distanceMatrix = np.loadtxt(self.file_paths["distance_matrix_file"])
 
     def get_file_paths(self):
-        """
-        Generate file paths for different datasets based on the instance version.
-        """
+    
         return {
             "location_file": f"fullDist Set V Data Location-{self.instance_version}.xlsx",
             "county_file": f"fullDist Set C Data-{self.instance_version}.xlsx",
@@ -40,9 +35,7 @@ class NetworkData:
         }
 
     def define_sets(self):
-        """
-        Define sets used in the model.
-        """
+      
         # C = len(self.df_C)  # Number of counties
         # V = len(self.df_V)  # Number of locations
         # R = len(self.df_R)  # Number of resources
@@ -72,6 +65,7 @@ class NetworkData:
         V1 = [int(i) for i in self.df_V[self.df_V['Type'] == 'Shelter']['Index']]
         V2 = [int(i) for i in self.df_V[self.df_V['Type'] == 'RSA']['Index']]
         V3 = [int(i) for i in self.df_V[self.df_V['Type'] == 'PoD']['Index']]
+        
 
         # Time period subsets
         T_Bef = list(range(int(T / 2)))
@@ -83,11 +77,11 @@ class NetworkData:
             "C": C, "V": V, "V0": V0, "V1": V1, "V2": V2, "V3": V3,
             "R": R, "T": T, "T_Bef": T_Bef, "T_Aft": T_Aft, "A": A
         }
+    
+        self.C = C
 
     def create_arc_set(self, V, V1, V3, C):
-        """
-        Create the set of arcs based on valid transport paths.
-        """
+   
         A = set()
         no_demand = []
 
@@ -106,9 +100,7 @@ class NetworkData:
         return A
 
     def define_parameters(self):
-        """
-        Define model parameters using loaded datasets.
-        """
+    
         W_k = self.df_inputs['People on Truck'][0]  # People on truck          
         tp_salary = self.df_inputs['People on Truck'][0] * self.tperiod  # Salary per time period    
         fuel = self.df_inputs['Fuel Cost Per Mile'][0] * 0.000621371  # Fuel cost per meter (converted from miles)    
