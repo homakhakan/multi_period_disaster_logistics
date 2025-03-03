@@ -1,6 +1,7 @@
 import pandas as pd
 import gurobipy as gp
 import os
+from openpyxl import load_workbook
 
 def ext_results(model, instance_version, num_sce, total_time, output_filename="ext_results.xlsx"):
 
@@ -52,17 +53,21 @@ def benders_results(instance_version, num_sce, LB, UB, output_filename="benders_
     print(f"\nBenders results stored in {output_filename}")
 
 def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, output_filename="mvp_results.xlsx"):
-
-    # Create a summary DataFrame
-    df_summary = pd.DataFrame({
+    # Create a DataFrame with MVP results
+    df = pd.DataFrame({
         "Instance Version": [instance_version],
         "Number of Scenarios": [num_sce],
         "MVP Objective Value": [mvp_obj_value],
         "MVP Execution Time (s)": [total_time_mvp]
     })
 
-    # Save summary to an Excel file
-    with pd.ExcelWriter(output_filename, engine="openpyxl") as writer:
-        df_summary.to_excel(writer, sheet_name="Summary", index=False)
+    # Check if the file already exists
+    if os.path.exists(output_filename):
+        with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
+            df.to_excel(writer, sheet_name="MVP_Results", index=False, header=False, startrow=writer.sheets["MVP_Results"].max_row)
+    else:
+        # Create a new file and write data with headers
+        with pd.ExcelWriter(output_filename, mode='w', engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name="MVP_Results", index=False)
 
-    print(f"\nMVP summary results stored in {output_filename}")
+    print(f"\nMVP results stored in {output_filename}")

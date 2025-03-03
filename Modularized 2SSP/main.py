@@ -5,17 +5,18 @@ import numpy as np
 import time
 from demand_data import DemandData
 from network_data import NetworkData
-from model import create_ext
-#from method import benders
+from model import TwoStageSPModel
+from method import benders
 import output
 
 if __name__ == "__main__":
     # Define parameters
-    num_sce = 5
+    num_sce = 50
     instance_version = "original"
     tperiod = 12
     thetaLB = 0
-    eps = 1e-4
+    eps = 1e-5
+    time_limit = 30
 
     demand_processor = DemandData(num_sce, instance_version) # Create an instance of the DemandData class
     demand_processor.generate_scenario_data() # Now call the methods using this instance
@@ -23,18 +24,8 @@ if __name__ == "__main__":
     # Print the output
     print(f"Number of scenarios: {demand_processor.num_sce}")
     print(f"Generated sheet names: {demand_processor.sheet_names}")
-    print("Sample demand data for location 7, time 2, scenario 3:", demand_processor.d_its[(7, 2, 3)])
-    print("Sample demand data for location 1, time 0, scenario 1:", demand_processor.d_its[(1, 0, 1)])
-
-    # Compute and load expected demand for mvp
-    output_demand_file = "expected_demand.xlsx"
-    demand_processor.calculate_expected_demand(output_demand_file)
-    expected_demand_file = "expected_demand.xlsx"
-    d_it = demand_processor.load_expected_demand(expected_demand_file)
-
-    # Print sample values to verify
-    print("Sample demand data for location 7, time 2:", d_it[(7, 2)])
-    print("Sample demand data for location 36, time 11:", d_it[(36, 11)])
+    #print("Sample demand data for location 7, time 2, scenario 3:", demand_processor.d_its[(7, 2, 3)])
+    #print("Sample demand data for location 1, time 0, scenario 1:", demand_processor.d_its[(1, 0, 1)])
 
     network_processor = NetworkData(instance_version, tperiod) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
@@ -51,88 +42,53 @@ if __name__ == "__main__":
     print(f"Time Before Landfall: {network_processor.T_Bef}")
     print(f"Time After Landfall: {network_processor.T_Aft}")
 
+    ## Solve extended formulation
+    ext_model_instance = TwoStageSPModel(network_processor, demand_processor, num_sce, is_mvp=False)
     start_time_ext = time.time()
-    # Create and Solve the Extended Formulation Model
-    model = create_ext(network_processor, demand_processor, num_sce)
-    model.optimize()
-
+    ext_model = ext_model_instance.ext_model()
+    ext_model.optimize()
     end_time_ext = time.time()
     total_time_ext = end_time_ext - start_time_ext
 
     # Print Results
-    if model.Status == gp.GRB.OPTIMAL:
-        print(f"\nOptimal Objective Value: {model.ObjVal}")
-        #  Store instance version, number of scenarios, and objective function value
-        output.ext_results(model, instance_version, num_sce, total_time_ext, output_filename="ext_results.xlsx")
+    if ext_model.Status == gp.GRB.OPTIMAL:
+        print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
+        output.ext_results(ext_model, instance_version, num_sce, total_time_ext, output_filename="ext_results.xlsx")
     else:
         print("\nModel did not solve to optimality.")
 
-    # Print Execution Time
     print(f"\nTotal Execution Time for extended model: {total_time_ext:.2f} seconds")
-
-    """
-    # start_time_benders = time.time()
-    master_model, I, theta = master_problem(sets, parameters, thetaLB)
-
-    # Create Subproblems
-    sub_opt, U_opt, S_opt, f_opt, \
-    pi_opt_inventory_balance_U, pi_opt_initial_shortage_U, \
-    pi_opt_flow_conservation, pi_opt_arc_capacity = optimality_sub(sets, parameters)
-
-    sub_feas, U_feas, S_feas, f_feas, epsilon_1, epsilon_2, epsilon_3, \
-    pi_feas_inventory_balance_U, pi_feas_initial_shortage_U, \
-    pi_feas_flow_conservation, pi_feas_arc_capacity = feasibility_sub(sets, parameters)
-
-    # Run Benders Decomposition
-    LB, UB, iter_count, Fcuts, Ocuts = benders(
-        master_model, I, theta, sub_opt, sub_feas, sets, parameters, d_its, eps, thetaLB, pi_opt_inventory_balance_U, pi_opt_initial_shortage_U, pi_opt_flow_conservation, pi_opt_arc_capacity, pi_feas_inventory_balance_U, pi_feas_initial_shortage_U, pi_feas_flow_conservation, pi_feas_arc_capacity, time_limit=10800
-
-    )
-   
-    # end_time_benders = time.time()
-    # total_time_benders = end_time_benders - start_time_benders
-
-    # Store Benders Decomposition Results
-    output.benders_results(instance_version, num_sce, LB, UB, output_filename="benders_results.xlsx")
-
-    # Print Benders Final Results
-    print("\nBenders Decomposition Finished:")
-    print(f"Final Lower Bound: {LB}")
-    print(f"Final Upper Bound: {UB}")
-    print(f"Total Iterations: {iter_count}")
-    print(f"Feasibility Cuts: {Fcuts}")
-    print(f"Optimality Cuts: {Ocuts}")
-    # print(f"Total Execution Time for Benders Decomposition: {total_time_benders:.2f} seconds")
     
-    # Create MVP Model
-    mvp_model = create_mvp()
-    I_mvp, U_mvp, S_mvp, f_mvp = dvs_mvp(mvp_model, sets)
-    cons_mvp(mvp_model, I_mvp, U_mvp, S_mvp, f_mvp, sets, parameters, d_it)
-    obj_mvp(mvp_model, I_mvp, U_mvp, S_mvp, f_mvp, sets, parameters)
+    ## Solve Benders
+    benders_model_instance = TwoStageSPModel(network_processor, demand_processor, num_sce, is_mvp=False)
+    # Define master and subproblems
+    benders_model_instance.master_problem(thetaLB)
+    benders_model_instance.optimality_sub()
+    benders_model_instance.feasibility_sub()   
+    start_time_benders = time.time() # Start Benders decomposition
+    LB, UB, num_iter, num_Fcuts, num_Ocuts = benders(benders_model_instance, eps, thetaLB, time_limit)
+    end_time_benders = time.time()
+    total_time_benders = end_time_benders - start_time_benders
+    output.benders_results(instance_version, num_sce, LB, UB, output_filename="benders_results.xlsx")
+    print(f"Total Execution Time for Benders Decomposition: {total_time_benders:.2f} seconds")
 
-    # Start recording execution time
-    start_time_mvp = time.time()
-
-    # Optimize the MVP model
+    ## Solve mvp
+    mvp_model_instance = TwoStageSPModel(network_processor, demand_processor, num_sce, is_mvp=True)
+    mvp_model = mvp_model_instance.ext_model()
+    start_time_mvp = time.time() # Start recording execution time
     mvp_model.optimize()
 
-    # Extract and display the objective function value if the model is optimal
-    if mvp_model.status == GRB.OPTIMAL:
-        I_mvp_values = {(i, r, t): I_mvp[i, r, t].x for i in range(sets["V"]) for r in range(sets["R"]) for t in range(sets["T"])}
+    if mvp_model.status == GRB.OPTIMAL: # Extract I_values after optimization
+        I_mvp_values = {(i, r, t): mvp_model.getVarByName(f"I_{i}_{r}_{t}").x
+                     for i in range(mvp_model_instance.network_processor.V)
+                     for r in range(mvp_model_instance.network_processor.R)
+                     for t in range(mvp_model_instance.network_processor.T)}
+        mvp_model_instance.optimality_sub()
+        mvp_obj_value = mvp_model_instance.compute_mvp_objective(I_mvp_values) # Compute MVP objective using I_mvp_values
         print(f"Objective Function Value: {mvp_model.ObjVal}")
-
     else:
         print("\nMVP Model did not solve to optimality.")
-
-    mvp_obj_value = compute_mvp_objective(sets, parameters, d_its, I_mvp_values, sub_opt, 
-    pi_opt_inventory_balance_U, pi_opt_initial_shortage_U, pi_opt_flow_conservation)
-
-    # Print the final MVP objective value
-    print(f"\nMean Value Problem (MVP) Objective: {mvp_obj_value}")
-
-    # Record execution time
-    end_time_mvp = time.time()
+    end_time_mvp = time.time() # Record execution time
     total_time_mvp = end_time_mvp - start_time_mvp
     print(f"Total Execution Time for mvp: {end_time_mvp - start_time_mvp:.2f} seconds")
     output.mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, output_filename="mvp_results.xlsx")
-    """

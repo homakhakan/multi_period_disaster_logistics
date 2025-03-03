@@ -11,12 +11,12 @@ import output
 
 if __name__ == "__main__":
     # Define parameters
-    num_sce = 5
+    num_sce = 50
     instance_version = "original"
     tperiod = 12
     thetaLB = 0
     eps = 1e-5
-    time_limit = 3600
+    time_limit = 30
 
     demand_processor = DemandData(num_sce, instance_version) # Create an instance of the DemandData class
     demand_processor.generate_scenario_data() # Now call the methods using this instance
@@ -24,8 +24,8 @@ if __name__ == "__main__":
     # Print the output
     print(f"Number of scenarios: {demand_processor.num_sce}")
     print(f"Generated sheet names: {demand_processor.sheet_names}")
-    print("Sample demand data for location 7, time 2, scenario 3:", demand_processor.d_its[(7, 2, 3)])
-    print("Sample demand data for location 1, time 0, scenario 1:", demand_processor.d_its[(1, 0, 1)])
+    #print("Sample demand data for location 7, time 2, scenario 3:", demand_processor.d_its[(7, 2, 3)])
+    #print("Sample demand data for location 1, time 0, scenario 1:", demand_processor.d_its[(1, 0, 1)])
 
     network_processor = NetworkData(instance_version, tperiod) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
