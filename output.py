@@ -66,4 +66,3 @@ def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, output
         df_summary.to_excel(writer, sheet_name="Summary", index=False)
 
     print(f"\nMVP summary results stored in {output_filename}")
-
