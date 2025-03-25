@@ -1,4 +1,5 @@
 import pandas as pd
+import copy
 
 class DemandData:
     def __init__(self, num_sce, instance_version):
@@ -27,6 +28,7 @@ class DemandData:
 
     def compute_expected_demand(self):
 
+        self.d_its_original = copy.deepcopy(self.d_its)
         expected_demand = {}  # Dictionary to store averaged demand
 
         # Iterate over all locations and time periods
@@ -37,5 +39,14 @@ class DemandData:
             expected_demand[(i, t)] += self.d_its[(i, t, s)] / self.num_sce
 
         # Overwrite d_its to store only the averaged values (single scenario)
-        self.d_its = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
+        self.d_its_expected = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
+
+    def reset_to_original_demand(self):
+        if hasattr(self, 'd_its_original'):  # Check if we stored the original demand
+            self.d_its = self.d_its_original
+            self.P = [1 / self.num_sce] * self.num_sce  # Restore scenario probabilities
+            print("Demand data reset to original scenario-based demand.")
+            #print("Sample demand data for location 7, time 2, scenario 3:", self.d_its[(6, 2, 4)])
+        else:
+            print("No original demand stored. Cannot reset.")
 

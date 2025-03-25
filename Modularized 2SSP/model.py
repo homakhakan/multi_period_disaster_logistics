@@ -9,13 +9,13 @@ class TwoStageSPModel:
     def __init__(self, network_processor, demand_processor, num_sce, is_mvp=False):
         self.network_processor = network_processor  # Store network data
         self.demand_processor = demand_processor  # Store demand data
-        self.is_mvp = is_mvp  # Flag to differentiate between EXT and MVP models
-
-        if self.is_mvp:
-            self.num_sce = 1  # Only one scenario for MVP
-            self.demand_processor.compute_expected_demand()  # Modify d_its to store expected demand
+        # If solving MVP, use only one scenario (`s=0`)
+        if is_mvp:
+            self.num_sce = 1  # Only one scenario for expected demand
+            self.demand_processor.d_its = self.demand_processor.d_its_expected  # Use expected demand
+            self.demand_processor.P = [1]
         else:
-            self.num_sce = num_sce  # Keep multiple scenarios for EXT
+            self.num_sce = num_sce  # Use full scenarios for other models
 
     def ext_model(self):
         m = gp.Model("Two-Stage Stochastic Programming Model")
@@ -34,7 +34,7 @@ class TwoStageSPModel:
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
         t_ijt = self.network_processor.t_ijt   
-        P = [1] if self.is_mvp else self.demand_processor.P  # Single scenario probability for MVP
+        P = self.demand_processor.P
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
         m_ij = self.network_processor.m_ij
@@ -466,16 +466,12 @@ class TwoStageSPModel:
         self.sub_feas.setParam("OutputFlag", 0)
 
     def compute_mvp_objective(self, I_mvp_values):
-        # Recreate demand data processor
-        demand_processor = DemandData(self.demand_processor.num_sce, self.demand_processor.instance_version)
-        demand_processor.generate_scenario_data()
-        demand_processor.load_demand_data()  # Regenerate d_its from scratch
-        P = demand_processor.P  # Get new scenario probabilities
-        d_its = demand_processor.d_its  # Use reloaded d_its instead of the modified one
+
         P = self.demand_processor.P
         V = self.network_processor.V
         R = self.network_processor.R
         T = self.network_processor.T
+        d_its = self.demand_processor.d_its
         sce = range(len(P))
         mvpobj = 0  # Initialize the MVP objective value
 

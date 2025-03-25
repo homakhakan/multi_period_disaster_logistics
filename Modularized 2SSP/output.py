@@ -13,7 +13,7 @@ def ext_results(model, instance_version, num_sce, total_time, output_filename="e
             "Instance Version": [instance_version],
             "Number of Scenarios": [num_sce],
             "Objective Value": [obj_value],
-            "Time": [total_time]
+            "Time (seconds)": [total_time]
         })
 
         # Check if file exists
@@ -26,11 +26,11 @@ def ext_results(model, instance_version, num_sce, total_time, output_filename="e
             with pd.ExcelWriter(output_filename, mode='w', engine='openpyxl') as writer:
                 df.to_excel(writer, sheet_name="Objective", index=False)
 
-        print(f"Objective value stored in {output_filename}")
+        print(f"Extended results stored in {output_filename}")
     else:
         print("Model did not find an optimal solution. Objective not stored.")
 
-def benders_results(instance_version, num_sce, LB, UB, output_filename="benders_results.xlsx"):
+def benders_results(instance_version, num_sce, total_time_benders, LB, UB, output_filename="benders_results.xlsx"):
 
     # Create a DataFrame with Benders results
     df = pd.DataFrame({
@@ -38,6 +38,7 @@ def benders_results(instance_version, num_sce, LB, UB, output_filename="benders_
         "Number of Scenarios": [num_sce],
         "Lower Bound": [LB],
         "Upper Bound": [UB],
+        "Time (seconds)": [total_time_benders]
     })
 
     # Check if the file already exists
@@ -57,8 +58,8 @@ def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, output
     df = pd.DataFrame({
         "Instance Version": [instance_version],
         "Number of Scenarios": [num_sce],
-        "MVP Objective Value": [mvp_obj_value],
-        "MVP Execution Time (s)": [total_time_mvp]
+        "Objective Value": [mvp_obj_value],
+        "Time (seconds)": [total_time_mvp]
     })
 
     # Check if the file already exists
