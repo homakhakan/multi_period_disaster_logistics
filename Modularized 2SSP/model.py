@@ -6,18 +6,26 @@ from demand_data import DemandData
 
 ### Extended
 class TwoStageSPModel:
-    def __init__(self, network_processor, demand_processor, num_sce, is_mvp=False):
+    def __init__(self, network_processor, demand_processor, num_sce):
         self.network_processor = network_processor  # Store network data
         self.demand_processor = demand_processor  # Store demand data
-        # If solving MVP, use only one scenario (`s=0`)
-        if is_mvp:
-            self.num_sce = 1  # Only one scenario for expected demand
-            self.demand_processor.d_its = self.demand_processor.d_its_expected  # Use expected demand
-            self.demand_processor.P = [1]
-        else:
-            self.num_sce = num_sce  # Use full scenarios for other models
+        if not hasattr(self.demand_processor, 'd_its_original'):
+            self.demand_processor.d_its_original = self.demand_processor.d_its
+        if not hasattr(self.demand_processor, 'P_original'):
+            self.demand_processor.P_original = self.demand_processor.P.copy()
 
-    def ext_model(self):
+        self.num_sce = num_sce  # Use full scenarios for other models
+
+    def ext_model(self, is_mvp=False):
+        if is_mvp:
+            self.demand_processor.d_its = self.demand_processor.d_its_expected
+            self.demand_processor.P = [1]
+            self.num_sce = 1
+        else:
+            self.demand_processor.d_its = self.demand_processor.d_its_original
+            self.demand_processor.P = self.demand_processor.P_original
+            self.num_sce = len(self.demand_processor.P_original)
+
         m = gp.Model("Two-Stage Stochastic Programming Model")
 
         V = self.network_processor.V

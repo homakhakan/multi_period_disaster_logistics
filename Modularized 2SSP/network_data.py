@@ -112,8 +112,8 @@ class NetworkData:
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
 
         # Penalty costs per location
-        multiplier1 = 1  
-        self.p_i = (self.df_V['P_i'] * multiplier1).tolist()
+        self.multiplier1 = 1e6  
+        self.p_i = (self.df_V['P_i'] * self.multiplier1).tolist()
 
         # Travel time in time periods
         seconds_per_hour = 3600
@@ -123,10 +123,10 @@ class NetworkData:
         self.h_i = self.df_V['TruckDelay'].tolist()
 
         # Travel cost between locations
-        multiplier2 = 1  # Scaling factor
+        self.multiplier2 = 1  # Scaling factor
         self.m_ij = [
             [
-                ((self.distanceMatrix[i][j] * self.fuel) + (self.t_ijt[i][j] * self.tp_salary * self.W_k) + (self.h_i[i] * self.tp_salary * self.W_k)) * multiplier2
+                ((self.distanceMatrix[i][j] * self.fuel) + (self.t_ijt[i][j] * self.tp_salary * self.W_k) + (self.h_i[i] * self.tp_salary * self.W_k)) * self.multiplier2
                 for j in range(len(self.df_V))
             ]
             for i in range(len(self.df_V))
@@ -146,7 +146,9 @@ class NetworkData:
         self.g_pod = self.df_R['pallet per P-Kit'].tolist()
 
         # Initialize K_ijt
+        self.multiplier3 = 1  # Scaling factor
         self.K_ijt = {}
         for index, row in self.df_K.iterrows():
-            i, j, t, capacity = row['From_Node'], row['To_Node'], row['Time_Period'], row['Capacity']
+            i, j, t = row['From_Node'], row['To_Node'], row['Time_Period']
+            capacity = row['Capacity'] * self.multiplier3
             self.K_ijt.setdefault(i, {}).setdefault(j, {})[t] = capacity

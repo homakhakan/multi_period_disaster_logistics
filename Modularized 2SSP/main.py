@@ -14,9 +14,9 @@ import yaml
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
-    parser.add_argument("-iv", "--instance_version", type=str, choices=[0, 1, 2, 3], help="Instance version: 0. original, 1. smallsize, 2. mediumsize, 3. largesize")
+    parser.add_argument("-iv", "--instance_version", type=str, choices=["smallsize", "mediumsize", "largesize", "original"], help="Instance version: 0. original, 1. smallsize, 2. mediumsize, 3. largesize")
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
-    parser.add_argument("-sm", "--solution_method", type=str, choices=[1, 2, 3], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp")
+    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp")
     args = parser.parse_args()
 
     with open("fixed_params.yaml", "r") as f:
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     print(f"Scenario probabilities: {demand_processor.P}")
 
     # Run only the selected model
-    if args.solution_method == "extended":
+    if args.solution_method == 1:
         ext_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         start_time_ext = time.time()
         ext_model = ext_model_instance.ext_model()
@@ -65,13 +65,13 @@ if __name__ == "__main__":
         # Print and save results
         if ext_model.Status == gp.GRB.OPTIMAL:
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
-            output.ext_results(ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, output_filename="ext_results.xlsx")
+            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="ext_results.xlsx")
         else:
             print("\nModel did not solve to optimality.")
 
         print(f"Total Execution Time for Extended Model: {total_time_ext:.2f} seconds")
 
-    elif args.solution_method == "benders":
+    elif args.solution_method == 2:
         benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         benders_model_instance.master_problem(thetaLB)
         benders_model_instance.optimality_sub()
@@ -84,21 +84,24 @@ if __name__ == "__main__":
         output.benders_results(args.instance_version, args.num_sce, total_time_benders, LB, UB, output_filename="benders_results.xlsx")
         print(f"Total Execution Time for Benders: {total_time_benders:.2f} seconds")
 
-    elif args.solution_method == "mvp":
+    elif args.solution_method == 3:
         demand_processor.compute_expected_demand()
-        demand_processor.d_its = demand_processor.d_its_expected # Temporarily replace `d_its` with `d_its_expected` before solving EXT
-        mvp_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce, is_mvp=True)
-        mvp_model = mvp_model_instance.ext_model()
+        mvp_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        mvp_model = mvp_model_instance.ext_model(is_mvp=True)
         start_time_mvp = time.time()
         mvp_model.optimize()
-        print(f"\n🔹 MVP Model Objective Value: {mvp_model.ObjVal}")
+        print(f"\n MVP Model Objective Value: {mvp_model.ObjVal}")
 
         if mvp_model.status == gp.GRB.OPTIMAL:
             I_mvp_values = {(i, r, t): mvp_model.getVarByName(f"I_{i}_{r}_{t}").x
                             for i in range(mvp_model_instance.network_processor.V)
                             for r in range(mvp_model_instance.network_processor.R)
                             for t in range(mvp_model_instance.network_processor.T)}
-            demand_processor.reset_to_original_demand() # Restore original scenario-based demand before solving the subproblem
+
+            # Restore full scenario-based demand and probabilities
+            mvp_model_instance.demand_processor.d_its = mvp_model_instance.demand_processor.d_its_original
+            mvp_model_instance.demand_processor.P = mvp_model_instance.demand_processor.P_original
+            mvp_model_instance.num_sce = len(mvp_model_instance.demand_processor.P_original)
             mvp_model_instance.optimality_sub()
             mvp_obj_value = mvp_model_instance.compute_mvp_objective(I_mvp_values)
             print(f"MVP Objective Function Value: {mvp_model.ObjVal}")
@@ -108,4 +111,4 @@ if __name__ == "__main__":
         end_time_mvp = time.time()
         total_time_mvp = end_time_mvp - start_time_mvp
         print(f"Total Execution Time for MVP: {total_time_mvp:.2f} seconds")
-        output.mvp_results(args.instance_version, args.num_sce, total_time_mvp, mvp_obj_value, output_filename="mvp_results.xlsx")
+        output.mvp_results(args.instance_version, args.num_sce, total_time_mvp, mvp_obj_value, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="mvp_results.xlsx")
