@@ -6,7 +6,7 @@ import time
 from demand_data import DemandData
 from network_data import NetworkData
 from model import TwoStageSPModel
-from method import benders
+from method import benders, solve_rolling_horizon
 import output
 import argparse
 import yaml
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
     parser.add_argument("-iv", "--instance_version", type=str, choices=["smallsize", "mediumsize", "largesize", "original"], help="Instance version: 0. original, 1. smallsize, 2. mediumsize, 3. largesize")
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
-    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp")
+    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH")
     args = parser.parse_args()
 
     with open("fixed_params.yaml", "r") as f:

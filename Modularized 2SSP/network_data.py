@@ -112,7 +112,7 @@ class NetworkData:
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
 
         # Penalty costs per location
-        self.multiplier1 = 1e6  
+        self.multiplier1 = 1  
         self.p_i = (self.df_V['P_i'] * self.multiplier1).tolist()
 
         # Travel time in time periods
