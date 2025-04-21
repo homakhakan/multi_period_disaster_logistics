@@ -148,3 +148,28 @@ def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, multip
             df.to_excel(writer, sheet_name="MVP_Results", index=False)
 
     print(f"\nMVP results stored in {output_filename}")
+
+def rh_results(instance_version, num_sce, total_time, average_cost, path_costs, output_filename="rh_results.xlsx"):
+
+    # Summary DataFrame (overall average)
+    summary_df = pd.DataFrame({
+        "Instance Version": [instance_version],
+        "Number of Scenarios": [num_sce],
+        "Average Objective Value": [average_cost],
+        "Time (seconds)": [total_time]
+    })
+
+    # Path-wise cost DataFrame
+    path_df = pd.DataFrame({"Sample Path Index": list(range(len(path_costs))),
+                             "Objective Value": path_costs})
+
+    if os.path.exists(output_filename):
+        with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
+            summary_df.to_excel(writer, sheet_name="RH_Summary", index=False, header=False, startrow=writer.sheets["RH_Summary"].max_row)
+            path_df.to_excel(writer, sheet_name="RH_Path_Costs", index=False, header=False, startrow=writer.sheets["RH_Path_Costs"].max_row)
+    else:
+        with pd.ExcelWriter(output_filename, mode='w', engine='openpyxl') as writer:
+            summary_df.to_excel(writer, sheet_name="RH_Summary", index=False)
+            path_df.to_excel(writer, sheet_name="RH_Path_Costs", index=False)
+
+    print(f"\nRolling Horizon results stored in {output_filename}")

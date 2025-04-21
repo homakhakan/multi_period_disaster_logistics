@@ -6,7 +6,7 @@ import time
 from demand_data import DemandData
 from network_data import NetworkData
 from model import TwoStageSPModel
-from method import benders, solve_rolling_horizon
+from method import benders
 import output
 import argparse
 import yaml
@@ -16,6 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
     parser.add_argument("-iv", "--instance_version", type=str, choices=["smallsize", "mediumsize", "largesize", "original"], help="Instance version: 0. original, 1. smallsize, 2. mediumsize, 3. largesize")
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
+    parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH")
     args = parser.parse_args()
 
@@ -25,7 +26,7 @@ if __name__ == "__main__":
         thetaLB = float(params['THETA_LB'])
         eps = float(params['EPS'])
 
-    demand_processor = DemandData(args.num_sce, args.instance_version) # Create an instance of the DemandData class
+    demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS) # Create an instance of the DemandData class
     demand_processor.generate_scenario_data() # Now call the methods using this instance
     demand_processor.load_demand_data()
     # Print the output
@@ -112,3 +113,31 @@ if __name__ == "__main__":
         total_time_mvp = end_time_mvp - start_time_mvp
         print(f"Total Execution Time for MVP: {total_time_mvp:.2f} seconds")
         output.mvp_results(args.instance_version, args.num_sce, total_time_mvp, mvp_obj_value, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="mvp_results.xlsx")
+
+    elif args.solution_method == 4:
+        rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        
+        # Provide the sample path file path here (update the path as needed)
+        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/sample_paths.csv"  # <-- Update with actual path
+
+        start_time_rh = time.time()
+        avg_cost, total_costs = rh_model_instance.RH_evaluation(
+            sample_paths=sample_paths_file,
+            demand_processor=demand_processor,
+            network_processor=network_processor
+        )
+        end_time_rh = time.time()
+        total_time_rh = end_time_rh - start_time_rh
+
+        print(f"\nAverage RH Objective Value: {avg_cost:.2f}")
+        print(f"Total RH Costs per Sample Path: {total_costs}")
+        print(f"Total Execution Time for RH Evaluation: {total_time_rh:.2f} seconds")
+
+        output.rh_results(
+            instance_version=args.instance_version,
+            num_sce=args.num_sce,
+            total_time=total_time_rh,
+            average_cost=avg_cost,
+            path_costs=total_costs,
+            output_filename="rh_results.xlsx"
+        )

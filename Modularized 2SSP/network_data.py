@@ -116,8 +116,35 @@ class NetworkData:
         self.p_i = (self.df_V['P_i'] * self.multiplier1).tolist()
 
         # Travel time in time periods
+        # seconds_per_hour = 3600
+        # self.t_ijt = [[math.ceil((self.timeMatrix[i][j] / seconds_per_hour) / self.tperiod) for j in range(len(self.df_V))] for i in range(len(self.df_V))]
+        # df_t_ijt = pd.DataFrame(self.t_ijt)
+        # df_t_ijt.to_csv("t_ijt_matrix.csv", index=False)
+        # print("\nt_ijt matrix saved to t_ijt_matrix.csv")
+
+        # Travel time in time periods (randomized to create variation)
         seconds_per_hour = 3600
-        self.t_ijt = [[math.ceil((self.timeMatrix[i][j] / seconds_per_hour) / self.tperiod) for j in range(len(self.df_V))] for i in range(len(self.df_V))]
+        self.t_ijt = []
+
+        for i in range(len(self.df_V)):
+            row = []
+            for j in range(len(self.df_V)):
+                base_time = self.timeMatrix[i][j] / seconds_per_hour / self.tperiod
+                if i == j:
+                    travel_time = 0  # No self-loop
+                else:
+                    # Slight randomization: ceil to integer, then add extra delay for some
+                    travel_time = math.ceil(base_time)
+                    if travel_time == 1 and np.random.rand() < 0.3:  # 30% chance to add delay
+                        travel_time += np.random.randint(1, 3)  # Add 1 or 2 extra time periods
+                row.append(travel_time)
+            self.t_ijt.append(row)
+
+        # Save to CSV to inspect
+        df_t_ijt = pd.DataFrame(self.t_ijt)
+        df_t_ijt.to_csv("t_ijt_matrix_randomized.csv", index=False)
+        print("\nt_ijt matrix with variation saved to t_ijt_matrix_randomized.csv")
+
 
         # Truck delay per location
         self.h_i = self.df_V['TruckDelay'].tolist()
