@@ -1,15 +1,38 @@
+import os
+import sys
 import gurobipy as gp
 from gurobipy import GRB
 import pandas as pd
 import numpy as np
 import time
+import argparse
+import yaml
+from shapely.geometry import Point, LineString
+import math
+
+# --- Temporarily switch to your friend's directory to allow imports and file reads ---
+friend_dir = "C:/Users/hkhakan/OneDrive - Clemson University/Documents/GitHub/MSSP_IHRLEP_Networks"
+my_dir = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new"
+
+os.chdir(friend_dir)
+sys.path.append(friend_dir)
+
+from data_main import Data
+from demand_homa import in_sample, demand_deterministic_landfall, data
+import commands
+import helper
+
+# --- Switch back to your own working directory ---
+os.chdir(my_dir)
+
+# --- Now import your own modules ---
 from demand_data import DemandData
 from network_data import NetworkData
 from model import TwoStageSPModel
 from method import benders
 import output
-import argparse
-import yaml
+from output import save_full_oos_demand
+os.makedirs("outputs", exist_ok=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -17,29 +40,32 @@ if __name__ == "__main__":
     parser.add_argument("-iv", "--instance_version", type=str, choices=["smallsize", "mediumsize", "largesize", "original"], help="Instance version: 0. original, 1. smallsize, 2. mediumsize, 3. largesize")
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
+    parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
+    parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH")
     args = parser.parse_args()
 
     with open("fixed_params.yaml", "r") as f:
         params = yaml.safe_load(f)
-        tperiod = int(params['TPERIOD'])
-        thetaLB = float(params['THETA_LB'])
-        eps = float(params['EPS'])
 
-    demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS) # Create an instance of the DemandData class
-    demand_processor.generate_scenario_data() # Now call the methods using this instance
-    demand_processor.load_demand_data()
-    # Print the output
-    print(f"Number of scenarios: {demand_processor.num_sce}")
-    print(f"Generated sheet names: {demand_processor.sheet_names}")
-    #print("Sample demand data for location 7, time 2, scenario 3:", demand_processor.d_its[(6, 2, 4)])
-
-    network_processor = NetworkData(args.instance_version, tperiod) # Create an instance of the NetworkData class
+    network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters()
 
-    print("\nReading data...")  
+    demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
+    # ----------- Simulated In-Sample Demand Setup ------------
+    print("\nGenerating in-sample demand...")
+    demand_processor.load_oos_inputs(population_file="PoD location information.xlsx", distance_file="distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+    demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor)
+    demand_processor.allocate_demand(demand_files = [f"csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Shelter_Demand.xlsx", network_processor=network_processor)
+    demand_processor.calculate_landfall_demand(wind_speed_file="LandfallStates.xlsx", pod_info_file="PoD location information.xlsx", output_file="POD_Demand_total.xlsx")
+    demand_processor.distribute_demand_by_time(total_demand_file="PoD_Demand_total.xlsx", network_processor=network_processor, output_file="POD_Demand.xlsx")
+    demand_processor.combine_demand_data(shelter_file="Shelter_Demand.xlsx",pod_file="POD_Demand.xlsx", network_processor=network_processor, output_file="demand_data_dynamic.xlsx")
+    demand_processor.generate_scenario_data()
+    demand_processor.load_demand_data()
+
+    print("\nReading data...")  
     # Print the output
     print(f"\nAll counties: {network_processor.C}")
     print(f"All locations: {network_processor.V}")
@@ -51,14 +77,14 @@ if __name__ == "__main__":
     print(f"Time periods: {network_processor.T}")
     print(f"Time Before Landfall: {network_processor.T_Bef}")
     print(f"Time After Landfall: {network_processor.T_Aft}")
-    print(f"Scenario indices: {demand_processor.sce}")
+    # print(f"Scenario indices: {demand_processor.sce}")
     print(f"Scenario probabilities: {demand_processor.P}")
 
     # Run only the selected model
     if args.solution_method == 1:
         ext_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         start_time_ext = time.time()
-        ext_model = ext_model_instance.ext_model()
+        ext_model, I_vars = ext_model_instance.ext_model()
         ext_model.optimize()
         end_time_ext = time.time()
         total_time_ext = end_time_ext - start_time_ext
@@ -67,10 +93,35 @@ if __name__ == "__main__":
         if ext_model.Status == gp.GRB.OPTIMAL:
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
             output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="ext_results.xlsx")
+            
+            fixed_I_ir0 = ext_model_instance.extract_first_stage(I_vars)
+
         else:
             print("\nModel did not solve to optimality.")
 
         print(f"Total Execution Time for Extended Model: {total_time_ext:.2f} seconds")
+
+    if args.eval_oos:
+
+        if 'fixed_I_ir0' not in locals():
+            raise RuntimeError("You must solve the model once, before running OOS evaluation.")        
+
+        # -------- OOS Evaluation --------------------
+        print("\nStarting OOS evaluation...")
+        total_costs = []
+
+        # Load inputs once
+        demand_processor.load_oos_inputs(population_file="PoD location information.xlsx", distance_file="distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+
+        for path in range(args.num_oos):
+            oos_demand = demand_processor.generate_full_oos_demand(path, network_processor)
+            #save_full_oos_demand(oos_demand, network_processor, output_file=f"outputs/oos_path_{path}.xlsx")
+            cost = ext_model_instance.OOS_2SSP(fixed_I_ir0, oos_demand)
+            total_costs.append(cost)
+            print(f"OOS Scenario {path}: Cost = {cost:.2f}")
+
+        print(f"\nAverage OOS Cost over {args.num_oos} scenarios: {np.mean(total_costs):.2f}")
+        output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, output_filename="oos_2SSP_results.xlsx")
 
     elif args.solution_method == 2:
         benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
@@ -118,7 +169,7 @@ if __name__ == "__main__":
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/sample_paths.csv"  # <-- Update with actual path
+        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/real_sample_paths.csv"  # <-- Update with actual path
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation(

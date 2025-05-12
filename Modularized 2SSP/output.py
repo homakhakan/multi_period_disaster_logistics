@@ -103,6 +103,65 @@ def ext_results(model_instance, model, instance_version, num_sce, total_time, mu
     else:
         print("Model did not find an optimal solution. Objective not stored.")
 
+def oos_2SSP_results(costs, instance_version, num_oos, output_filename="oos_results.xlsx"):
+    """
+    Save individual and average out-of-sample (OOS) costs to an Excel file.
+
+    """
+
+    df = pd.DataFrame({
+        "Scenario": list(range(num_oos)),
+        "Cost": costs
+    })
+
+    df_avg = pd.DataFrame({
+        "Scenario": ["Average"],
+        "Cost": [sum(costs) / len(costs)]
+    })
+
+    combined_df = pd.concat([df, df_avg], ignore_index=True)
+
+    sheet_name = "OOS_Results"
+
+    # Save to Excel
+    if os.path.exists(output_filename):
+        with pd.ExcelWriter(output_filename, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
+            combined_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=writer.sheets[sheet_name].max_row)
+    else:
+        with pd.ExcelWriter(output_filename, mode='w', engine='openpyxl') as writer:
+            combined_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    print(f"\nOOS results stored in {output_filename}")
+
+
+import pandas as pd
+
+def save_full_oos_demand(full_demand, network_processor, output_file="full_oos_demand.xlsx"):
+    """
+    Save the full OOS demand dictionary to Excel with locations as rows and time periods as columns.
+    
+    Args:
+        full_demand (dict): Dictionary {(i, t): demand}
+        network_processor: Instance of NetworkData to access V and T
+        output_file (str): Path to the output Excel file
+    """
+    V = network_processor.V
+    T = network_processor.T
+
+    # Create a DataFrame with index=1...V and columns=0...T-1
+    df = pd.DataFrame(index=range(1, V+1), columns=range(T))
+
+    for (i, t), val in full_demand.items():
+        df.at[i + 1, t] = round(val, 3)  # +1 to match Excel indexing (starts from 1)
+
+    df.fillna(0, inplace=True)
+
+    # Add 'Index' column like your screenshot
+    df.insert(0, "Index", df.index)
+
+    df.to_excel(output_file, index=False)
+    print(f"✅ Full OOS demand saved to: {output_file}")
+
 def benders_results(instance_version, num_sce, total_time_benders, LB, UB, output_filename="benders_results.xlsx"):
 
     # Create a DataFrame with Benders results

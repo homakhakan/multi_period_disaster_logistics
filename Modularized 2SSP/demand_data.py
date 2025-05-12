@@ -1,18 +1,25 @@
 import pandas as pd
+import numpy as np
 import copy
+import os
 
 class DemandData:
-    def __init__(self, num_sce, instance_version, nbOS):
+    def __init__(self, num_sce, instance_version, nbOS, params):
         self.num_sce = num_sce
         self.nbOS = nbOS
         self.instance_version = instance_version
         self.d_its = {}  # Dictionary to store demand data
         self.full_demand_data = {}  # Store all data for later reuse
+        self.population = None # PoD-level population, loaded once
+        self.weights = None # Inverse distance weights (PoD → Shelter)
+
+        self.params = params
+        self.std_pod = float(params["std_pod"])
 
     def generate_scenario_data(self):
         self.sce = list(range(self.num_sce))  # Generate scenario indices
         self.P = [1 / self.num_sce] * self.num_sce  # Generate equal probabilities
-        self.demand_file = f"demand_data_{self.instance_version}.xlsx"  # Demand file name
+        self.demand_file = "demand_data_dynamic.xlsx"  # Demand file name
         self.sheet_names = [f"Scenario_{i}" for i in self.sce]  # Sheet names
 
     def load_demand_data(self):
@@ -33,22 +40,373 @@ class DemandData:
             #     for t in range(demand_array.shape[1]):
             #         self.full_demand_data[(loc, t, s)] = demand_array[loc, t]
 
-    def update_d_its_for_roll(self, t_bar, roll_index):
- 
-        self.d_its.clear()  # Clear the previous data
-        scenarios_per_roll = self.num_sce  # use same value unless you want different groups
+    def load_oos_inputs(self, population_file, distance_file, network_processor):
+        """
+        Loads PoD population and inverse-distance weights from PoDs to shelters.
+        Stores results in self.population and self.weights.
+        """
+        # Load PoD population
+        pod_info_df = pd.read_excel(population_file, sheet_name="Sheet1")
+        self.population = pod_info_df["Pop. of County"].to_numpy()
 
-        start_idx = roll_index * scenarios_per_roll
-        end_idx = start_idx + scenarios_per_roll
-        selected_scenarios = list(range(start_idx, min(end_idx, len(self.sheet_names))))
+        # Load distance matrix (PoDs to shelters)
+        full_matrix = pd.read_excel(distance_file, header=None)
+        num_pods = len(network_processor.V3)
+        num_shelters = len(network_processor.V1)
 
-        self.sce = selected_scenarios
-        self.P = [1 / len(selected_scenarios)] * len(selected_scenarios)
+        distance_matrix = full_matrix.iloc[:num_pods, :num_shelters]
 
-        for s in selected_scenarios:
-            for (i, t, ss), val in self.full_demand_data.items():
-                if ss == s and t >= t_bar:  # Only use time periods from t_bar onward
-                    self.d_its[(i, t, s)] = val
+        # Compute inverse distance weights
+        inverse_distances = 1 / distance_matrix.replace(0, float("inf"))
+        self.weights = inverse_distances.div(inverse_distances.sum(axis=1), axis=0)
+
+    def generate_in_sample_demand(self, num_sce, network_processor, output_dir="csv_by_location"):
+        """
+        Generates in-sample demand based on hurricane track and category,
+        scales by population, saves CSV files per location, and landfall states.
+
+        Returns:
+            in_sample_data: Array of in-sample hurricane states
+        """
+        from demand_homa import in_sample, demand_deterministic_landfall, data  # Local import
+
+        if self.population is None:
+            raise ValueError("Population data not loaded. Call load_oos_inputs() first.")
+
+        initial_state = data.state_space[0][0]
+        S = num_sce
+
+        in_sample_data = in_sample(0, initial_state, S)
+
+        # Save landfall states to Excel
+        self.save_landfall_states(in_sample_data, network_processor)
+
+        all_demands = []
+        for s in range(S):
+            sample_demands = []
+            for t in network_processor.T_Bef:
+                track_err, intensity = in_sample_data[s, t]
+                demand = demand_deterministic_landfall(data, track_err, intensity, t)
+                sample_demands.append(demand)
+            all_demands.append(sample_demands)
+
+        # Scale by population
+        scaled_demands = np.array(all_demands) * self.population  # (S, T, I)
+
+        # Save location-wise CSVs
+        os.makedirs(output_dir, exist_ok=True)
+        S, T, I = scaled_demands.shape
+
+        for i in range(I):
+            data_matrix = [np.round(scaled_demands[s, :, i], 3) for s in range(S)]
+            df = pd.DataFrame(data_matrix)
+            df.to_csv(os.path.join(output_dir, f"location_{i}.csv"), index=False, header=False)
+
+        print(f"✔ Saved scaled demand CSVs to: {os.path.abspath(output_dir)}")
+
+        return in_sample_data  # needed for next steps
+    
+    def generate_oos_shelter_demand(self, path, network_processor):
+        """
+        Generates shelter demand for a single out-of-sample (OOS) scenario.
+        Returns:
+            dict: Shelter demand dictionary {(i, t): value} for i ∈ V1, t ∈ T_Bef.
+        """
+        from demand_homa import demand_deterministic_landfall, data
+
+        if self.population is None or self.weights is None:
+            raise ValueError("Population and weights must be loaded first using load_oos_inputs()")
+
+        oos_demand = {}
+
+        for t in network_processor.T_Bef:
+            track_err, hurr_cat = data.test_samples_from_tree[path][t]
+            demand_vector = demand_deterministic_landfall(data, track_err, int(hurr_cat), t)
+            scaled_vector = demand_vector * self.population
+
+            demand_df = pd.DataFrame({t: scaled_vector})
+            shelter_demands = self.weights.multiply(demand_df[t], axis=0).sum(axis=0).values  # length 21
+
+            for shelter_idx, i in enumerate(network_processor.V1):
+                oos_demand[(i, t)] = shelter_demands[shelter_idx]
+
+        return oos_demand
+
+    def generate_oos_pod_demand(self, hurr_cat, network_processor):
+        """
+        Generates post-landfall PoD demand for a single OOS scenario using
+        the hurricane category at landfall and distributes it over T_Aft.
+
+        Returns:
+            dict: PoD demand dictionary {(i, t): value} for i ∈ V3, t ∈ T_Aft
+        """
+        # Load static PoD data if not already loaded
+        if not hasattr(self, "pod_info_df"):
+            self.pod_info_df = pd.read_excel("PoD location information.xlsx", sheet_name="Sheet1")
+
+        # Handle Category 0 → assign zero demand
+        if int(hurr_cat) == 0 or pd.isna(hurr_cat):
+            print(f"[Info] Category 0 detected at landfall. Assigning zero PoD demand.")
+            return {(i, t): 0.0 for i in network_processor.V3 for t in network_processor.T_Aft}
+
+        # Step 1: Convert category to string label
+        cat_label = f"Category {int(hurr_cat)}"
+
+        # Step 2: Column mapping for demand calculation
+        column_map = {
+            "Category 1": "I*p_c (cat 1)",
+            "Category 2": "I*p_c (cat 2)",
+            "Category 3": "I*p_c (cat 3)",
+            "Category 4": "I*p_c (cat 4)",
+            "Category 5": "I*p_c (cat 5)"
+        }
+
+        demand_col = column_map.get(cat_label, None)
+        if demand_col is None:
+            raise ValueError(f"Invalid hurricane category: {hurr_cat}")
+
+        evac_col = "% 1- (Likely to evacuate)"
+
+        # Step 3: Calculate total PoD demand for each location
+        total_demand = self.pod_info_df[demand_col] * self.pod_info_df[evac_col]
+        total_demand = total_demand.to_numpy()  # shape: (7,)
+
+        # Step 4: Create normal-distribution-based weights over T_Aft
+        mean = np.mean(network_processor.T_Aft)
+        std = self.std_pod  # from YAML or class-level default
+
+        weights = np.array([
+            np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
+        ])
+        weights /= weights.sum()  # Normalize to sum to 1
+
+        # Step 5: Build final {(i, t)} dictionary
+        pod_demand = {}
+        for idx, i in enumerate(network_processor.V3):
+            for w_idx, t in enumerate(network_processor.T_Aft):
+                pod_demand[(i, t)] = total_demand[idx] * weights[w_idx]
+
+        return pod_demand
+    
+    def generate_full_oos_demand(self, path, network_processor):
+        """
+        Combines OOS shelter and PoD demand into one full demand dictionary.
+
+        Returns:
+            dict: Full OOS demand dictionary {(i, t): demand}
+        """
+        from demand_homa import data  # Access test_samples_from_tree
+
+        # Generate shelter demand (for i in V1, t in T_Bef)
+        shelter_demand = self.generate_oos_shelter_demand(path, network_processor)
+
+        # Extract hurricane category at t_L for the same path
+        _, hurr_cat = data.test_samples_from_tree[path][network_processor.t_L]
+
+        # Generate PoD demand (for i in V3, t in T_Aft)
+        pod_demand = self.generate_oos_pod_demand(hurr_cat, network_processor)
+
+        # Combine and initialize full demand dictionary
+        full_demand = {}
+
+        for i in range(network_processor.V):
+            for t in range(network_processor.T):
+                # Prioritize actual demands
+                if (i, t) in shelter_demand:
+                    full_demand[(i, t)] = shelter_demand[(i, t)]
+                elif (i, t) in pod_demand:
+                    full_demand[(i, t)] = pod_demand[(i, t)]
+                else:
+                    full_demand[(i, t)] = 0.0  # Zero for all others
+
+        return full_demand
+
+    def allocate_demand(self, demand_files, output_file, network_processor, num_scenarios=None):
+
+        # Allocates demand from PoDs to shelters based on inverse distance.
+
+        if num_scenarios is None:
+            num_scenarios = self.num_sce
+
+        if self.weights is None:
+            raise ValueError("Inverse distance weights not loaded. Call load_oos_inputs() first.")
+        
+        weights = self.weights
+
+        # Load demand data (7 files, each with 1048 scenarios & 6 time periods)
+        demand_scenarios = [pd.read_csv(file, header=None) for file in demand_files]
+
+        # Allocate demand for the specified number of scenarios
+        allocated_demand = {}
+        for scenario_idx in range(num_scenarios):
+            # Extract demand for this scenario across all 7 PODs (6 time periods each)
+            demand_df = pd.DataFrame({t: [demand_scenarios[pod].iloc[scenario_idx, t] for pod in range(network_processor.num_pods)] for t in range(len(network_processor.T_Bef))})
+
+            # Allocate demand based on distance weights
+            allocation_matrix = {t: weights.multiply(demand_df[t], axis=0).sum(axis=0) for t in range(len(network_processor.T_Bef))}
+
+            # Convert to DataFrame where rows are shelters, columns are time periods
+            allocated_demand[f"Scenario_{scenario_idx}"] = pd.DataFrame(allocation_matrix, index=range(network_processor.num_shelters))
+
+        # Save the results
+        with pd.ExcelWriter(output_file) as writer:
+            for scenario, df in allocated_demand.items():
+                df.to_excel(writer, sheet_name=scenario)
+
+        print(f"✅ Demand allocation completed. File saved: {output_file}")
+
+    def save_landfall_states(self, in_sample_data, network_processor, output_file="LandfallStates.xlsx"):
+        """
+        Extract hurricane track and category at time of landfall and save to Excel.
+
+        """
+        t_L = network_processor.t_L
+        S = in_sample_data.shape[0]
+        landfall_states = []
+
+        for s in range(S):
+            track_err, hurr_cat = in_sample_data[s, t_L]
+            landfall_states.append([track_err, hurr_cat])
+
+        df_landfall = pd.DataFrame(landfall_states, columns=["track_err", "hurr_cat"])
+        df_landfall["hurr_cat"] = df_landfall["hurr_cat"].apply(
+            lambda x: f"Category {int(x)}" if pd.notna(x) else "N/A")
+
+        df_landfall.to_excel(output_file, index=False)
+        print(f"✔ Saved PoD landfall states to: {output_file}")
+
+    def calculate_landfall_demand(self, wind_speed_file, pod_info_file, output_file):
+        # Load the data
+        wind_speed_df = pd.read_excel(wind_speed_file, header=0)
+        pod_info_df = pd.read_excel(pod_info_file, sheet_name='Sheet1')
+
+        # Read hurricane categories from column 'hurr_cat'
+        categories = wind_speed_df['hurr_cat'].fillna("N/A")
+
+        # Define columns corresponding to each category
+        category_columns = {
+            "Category 1": "I*p_c (cat 1)",
+            "Category 2": "I*p_c (cat 2)",
+            "Category 3": "I*p_c (cat 3)",
+            "Category 4": "I*p_c (cat 4)",
+            "Category 5": "I*p_c (cat 5)"
+        }
+
+        # Get the column for '% 1- (Likely to evacuate)'
+        evac_column = '% 1- (Likely to evacuate)'
+
+        # Create an Excel writer to save the results
+        with pd.ExcelWriter(output_file) as writer:
+            for scenario_idx in range(len(categories)):
+                # Get the category for this scenario
+                category = categories.iloc[scenario_idx]
+
+                # Check if the category is valid
+                demand_column = category_columns.get(category, None)
+
+                if demand_column is not None:
+                    # Extract the necessary data for calculation
+                    pod_demand_values = pod_info_df[demand_column]
+                    evacuation_factors = pod_info_df[evac_column]
+
+                    # Calculate demand: (I*p_c) * (% 1- Likely to evacuate)
+                    demand_values = pod_demand_values * evacuation_factors
+
+                else:
+                    # If the category is N/A, set demand to 0
+                    demand_values = pd.Series(0, index=pod_info_df.index)
+
+                # Ensure numeric data type
+                demand_values = demand_values.astype(float)
+
+                # Prepare the output DataFrame
+                scenario_data = pd.DataFrame({
+                    'County': pod_info_df['County'],
+                    'total demand': demand_values
+                })
+
+                # Write to Excel sheet for this scenario
+                sheet_name = f'Scenario_{scenario_idx}'
+                scenario_data.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        print(f"✅ Corrected output file generated: {output_file}")
+
+    def distribute_demand_by_time(self, total_demand_file, network_processor, output_file):
+        # Load the total demand file
+        total_demand_data = pd.ExcelFile(total_demand_file)
+
+        # Define time periods and normal distribution parameters
+        time_periods = time_periods = network_processor.T_Aft
+        mean = np.mean(network_processor.T_Aft)
+        std = self.std_pod
+
+        # Calculate normalized weights using a normal distribution
+        distribution_values = [np.exp(-((t - mean) ** 2) / (2 * (std ** 2))) for t in time_periods]
+        weights = np.array(distribution_values) / sum(distribution_values)  # Normalize weights to sum to 1
+
+        # Create an Excel writer to save the results
+        with pd.ExcelWriter(output_file) as writer:
+            for sheet_name in total_demand_data.sheet_names:
+                # Read the data for the current scenario
+                scenario_data = pd.read_excel(total_demand_data, sheet_name=sheet_name)
+
+                # Apply the distribution weights to the total demand for each county
+                distributed_demands = {
+                    f'Time_{t}': scenario_data['total demand'] * weight for t, weight in zip(time_periods, weights)
+                }
+
+                # Prepare the output DataFrame
+                output_data = scenario_data[['County']].copy()
+                for period, demand in distributed_demands.items():
+                    output_data[period] = demand
+
+                # Write the output data to the Excel sheet
+                output_data.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        print(f"✅ Distributed demand file generated: {output_file}")
+    
+    def combine_demand_data(self, shelter_file, pod_file, network_processor, output_file, num_scenarios=None):
+        """
+        Combine shelter and pod demand into one Excel file with scenario sheets.
+        """
+        if num_scenarios is None:
+            num_scenarios = self.num_sce
+
+        # Read data from both files (assuming data is in each scenario sheet)
+        shelter_data = pd.read_excel(shelter_file, sheet_name=None)
+        pod_data = pd.read_excel(pod_file, sheet_name=None)
+
+        # Create an output Excel writer using openpyxl
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            for scenario_num in range(num_scenarios):
+                scenario_sheet = f'Scenario_{scenario_num}'
+
+                # Get data for the current scenario
+                shelter_scenario = shelter_data.get(scenario_sheet, pd.DataFrame())
+                pod_scenario = pod_data.get(scenario_sheet, pd.DataFrame())
+
+                # Initialize combined data structure
+                combined_data = pd.DataFrame(0.0, index=range(network_processor.num_locations), columns=range(network_processor.T))  # Initialize with float values
+
+                # Assign shelter demand
+                if not shelter_scenario.empty:
+                    shelter_values = shelter_scenario.iloc[:, 1 : 1 + len(network_processor.T_Bef)].values
+                    for row_idx, loc_id in enumerate(network_processor.V1):
+                        combined_data.iloc[loc_id, 0 : len(network_processor.T_Bef)] = shelter_values[row_idx]
+
+                # Assign PoD demand
+                if not pod_scenario.empty:
+                    pod_values = pod_scenario.iloc[:, 1 : 1 + len(network_processor.T_Aft)].values
+                    for row_idx, loc_id in enumerate(network_processor.V3):
+                        combined_data.iloc[loc_id, len(network_processor.T_Bef) : ] = pod_values[row_idx]
+
+                # Add index column
+                combined_data.insert(0, 'Index', range(1, network_processor.num_locations + 1))
+
+                # Write combined data to a new sheet
+                combined_data.to_excel(writer, sheet_name=scenario_sheet, index=False)
+
+        print(f"✅Combined data saved to {output_file}")
 
     def compute_expected_demand(self):
 
@@ -62,5 +420,7 @@ class DemandData:
             expected_demand[(i, t)] += self.d_its[(i, t, s)] / self.num_sce
 
         self.d_its_expected = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
+
+    
 
 

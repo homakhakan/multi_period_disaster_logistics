@@ -3,10 +3,14 @@ import numpy as np
 import math
 
 class NetworkData:
-    def __init__(self, instance_version, tperiod):
+    def __init__(self, instance_version, params):
    
         self.instance_version = instance_version
-        self.tperiod = tperiod
+        self.params = params
+        self.tperiod = int(params["TPERIOD"])
+        self.thetaLB = float(params["THETA_LB"])
+        self.eps = float(params["EPS"])
+        self.T_BEF = int(params["T_BEF"])
 
         # Load file paths
         self.get_file_paths()
@@ -22,6 +26,28 @@ class NetworkData:
         self.timeMatrix = np.loadtxt(self.file_paths["time_matrix_file"])
         self.distanceMatrix = np.loadtxt(self.file_paths["distance_matrix_file"])
 
+    @property
+    def num_warehouses(self):
+        return len(self.V0)
+
+    @property
+    def num_shelters(self):
+        return len(self.V1)
+
+    @property
+    def num_RSAs(self):
+        return len(self.V2)
+
+    @property
+    def num_pods(self):
+        return len(self.V3)
+
+    @property
+    def num_locations(self):
+        return len(self.df_V)
+
+
+    
     def get_file_paths(self):
     
         self.file_paths = {
@@ -45,7 +71,7 @@ class NetworkData:
         self.V0, self.V1, self.V2, self.V3 = [], [], [], []
         for i in range(self.V):
             location_type = self.df_V['Type'][i]
-            index = self.df_V['Index'][i]
+            index = int(self.df_V['Index'][i])
             if location_type in ['Warehouse', 'Supplier']:
                 self.V0.append(index)
             elif location_type == 'Shelter':
@@ -56,8 +82,11 @@ class NetworkData:
                 self.V3.append(index)      
 
         # Time period subsets
-        self.T_Bef = list(range(int(self.T / 2)))
-        self.T_Aft = list(range(int(self.T / 2), self.T))
+        self.T_Bef = list(range(self.T_BEF))
+        self.T_Aft = list(range(self.T_BEF, self.T))
+
+        # Time of landfall
+        self.t_L = max(self.T_Bef)
 
         self.A = self.create_arc_set()
 
@@ -84,25 +113,13 @@ class NetworkData:
     
         self.W_k = self.df_inputs['People on Truck'][0]  # People on truck          
         self.tp_salary = self.df_inputs['People on Truck'][0] * self.tperiod  # Salary per time period    
-        self.fuel = self.df_inputs['Fuel Cost Per Mile'][0] * 0.000621371  # Fuel cost per meter (converted from miles)    
+        self.fuel = self.df_inputs['Fuel Cost Per Mile'][0] * self.params["MILES_TO_METERS"] # Fuel cost per meter (converted from miles)    
 
         # Opening costs per location type
-        self.open_array = [
-            self.df_inputs['Open Cost V0'][0],
-            self.df_inputs['Open Cost V1'][0],
-            self.df_inputs['Open Cost V2'][0],
-            self.df_inputs['Open Cost V3'][0]
-        ]
+        self.open_array = [self.df_inputs[key][0] for key in self.params["OPEN_COST_KEYS"]]
 
         # Initialize inventory list
-        inventory_columns = {
-            "original": ['S-Kit StartInv', 'P-Kit StartInv', 'Water StartInv', 'Food StartInv', 'Cot StartInv', 'Blanket StartInv'],
-            "largesize": ['S-Kit StartInv', 'P-Kit StartInv', 'Water StartInv', 'Food StartInv', 'Cot StartInv', 'Blanket StartInv'],
-            "smallsize": ['Water StartInv'],
-            "mediumsize": ['Water StartInv', 'Blanket StartInv']
-        }
-
-        selected_columns = inventory_columns.get(self.instance_version, [])
+        selected_columns = self.params["INVENTORY_COLUMNS"][self.instance_version]
 
         Inv = []
         for i in range(len(self.df_V)):
@@ -112,45 +129,44 @@ class NetworkData:
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
 
         # Penalty costs per location
-        self.multiplier1 = 1  
-        self.p_i = (self.df_V['P_i'] * self.multiplier1).tolist()
+        self.multiplier1 = float(self.params["MULTIPLIER1"])
+        self.p_i = (self.df_V["P_i"] * self.multiplier1).tolist()
 
-        # Travel time in time periods
+        # Travel time in time periods (travel times are only 1 time period)
         # seconds_per_hour = 3600
         # self.t_ijt = [[math.ceil((self.timeMatrix[i][j] / seconds_per_hour) / self.tperiod) for j in range(len(self.df_V))] for i in range(len(self.df_V))]
-        # df_t_ijt = pd.DataFrame(self.t_ijt)
-        # df_t_ijt.to_csv("t_ijt_matrix.csv", index=False)
-        # print("\nt_ijt matrix saved to t_ijt_matrix.csv")
 
         # Travel time in time periods (randomized to create variation)
-        seconds_per_hour = 3600
-        self.t_ijt = []
+        # seconds_per_hour = 3600
+        # self.t_ijt = []
 
-        for i in range(len(self.df_V)):
-            row = []
-            for j in range(len(self.df_V)):
-                base_time = self.timeMatrix[i][j] / seconds_per_hour / self.tperiod
-                if i == j:
-                    travel_time = 0  # No self-loop
-                else:
-                    # Slight randomization: ceil to integer, then add extra delay for some
-                    travel_time = math.ceil(base_time)
-                    if travel_time == 1 and np.random.rand() < 0.3:  # 30% chance to add delay
-                        travel_time += np.random.randint(1, 3)  # Add 1 or 2 extra time periods
-                row.append(travel_time)
-            self.t_ijt.append(row)
+        # for i in range(len(self.df_V)):
+        #     row = []
+        #     for j in range(len(self.df_V)):
+        #         base_time = self.timeMatrix[i][j] / seconds_per_hour / self.tperiod
+        #         if i == j:
+        #             travel_time = 0  # No self-loop
+        #         else:
+        #             # Slight randomization: ceil to integer, then add extra delay for some
+        #             travel_time = math.ceil(base_time)
+        #             if travel_time == 1 and np.random.rand() < 0.3:  # 30% chance to add delay
+        #                 travel_time += np.random.randint(1, 3)  # Add 1 or 2 extra time periods
+        #         row.append(travel_time)
+        #     self.t_ijt.append(row)
 
-        # Save to CSV to inspect
-        df_t_ijt = pd.DataFrame(self.t_ijt)
-        df_t_ijt.to_csv("t_ijt_matrix_randomized.csv", index=False)
-        print("\nt_ijt matrix with variation saved to t_ijt_matrix_randomized.csv")
+        # # Save to CSV to inspect
+        # df_t_ijt = pd.DataFrame(self.t_ijt)
+        # df_t_ijt.to_csv("t_ijt_matrix_randomized.csv", index=False)
+        # print("\nt_ijt matrix with variation saved to t_ijt_matrix_randomized.csv")
 
+        # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
+        self.t_ijt = pd.read_csv("t_ijt_matrix_randomized.csv").values.tolist()
 
         # Truck delay per location
         self.h_i = self.df_V['TruckDelay'].tolist()
 
         # Travel cost between locations
-        self.multiplier2 = 1  # Scaling factor
+        self.multiplier2 = float(self.params["MULTIPLIER2"])  # Scaling factor
         self.m_ij = [
             [
                 ((self.distanceMatrix[i][j] * self.fuel) + (self.t_ijt[i][j] * self.tp_salary * self.W_k) + (self.h_i[i] * self.tp_salary * self.W_k)) * self.multiplier2
@@ -173,7 +189,7 @@ class NetworkData:
         self.g_pod = self.df_R['pallet per P-Kit'].tolist()
 
         # Initialize K_ijt
-        self.multiplier3 = 1  # Scaling factor
+        self.multiplier3 = float(self.params["MULTIPLIER3"])  # Scaling factor
         self.K_ijt = {}
         for index, row in self.df_K.iterrows():
             i, j, t = row['From_Node'], row['To_Node'], row['Time_Period']
