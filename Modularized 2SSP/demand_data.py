@@ -47,6 +47,7 @@ class DemandData:
         """
         # Load PoD population
         pod_info_df = pd.read_excel(population_file, sheet_name="Sheet1")
+        self.pod_info_df = pod_info_df
         self.population = pod_info_df["Pop. of County"].to_numpy()
 
         # Load distance matrix (PoDs to shelters)
@@ -60,6 +61,157 @@ class DemandData:
         inverse_distances = 1 / distance_matrix.replace(0, float("inf"))
         self.weights = inverse_distances.div(inverse_distances.sum(axis=1), axis=0)
 
+    def pre_landfall_demand_S_2SSP(self, sample_path_row, network_processor, demand_processor, t_L = None):
+        """
+        Generates full deterministic demand (from t=0 to t=t_L) for a given sample path row.
+        Updates demand_processor.d_its with (i, t, 0) keys.
+        
+        """
+        from demand_generation import demand_deterministic_landfall, data
+        
+        for t in range(t_L + 1):
+            s_t = eval(sample_path_row[t])
+            track_err, intensity = s_t
+
+            # Step 1: Compute PoD demand
+            demand_vector = demand_deterministic_landfall(data, track_err, int(intensity), t)
+            scaled_pod_demand = demand_processor.population * np.array(demand_vector)
+
+            # Step 2: Allocate to shelters
+            demand_df = pd.DataFrame({t: scaled_pod_demand})
+            shelter_demands = demand_processor.weights.multiply(demand_df[t], axis=0).sum(axis=0).values
+
+            # Step 3: Store in d_its with scenario index 0
+            for shelter_idx, i in enumerate(network_processor.V1):
+                demand_processor.d_its[(i, t, 0)] = shelter_demands[shelter_idx]
+
+    def post_landfall_demand_S_2SSP(self, sample_path_row, network_processor, demand_processor, t_L = None):
+        """
+        Generate deterministic PoD-level demand for t in T_Aft based on hurricane category at landfall
+        (i.e., state at t_L) from one realized sample path.
+
+        Updates demand_processor.d_its[(i, t, 0)] with demand for PoD locations (V3).
+        """
+        # Get landfall state (at t_L)
+        track_err_L, hurr_cat_L = eval(sample_path_row[t_L])
+        cat = int(hurr_cat_L)
+
+        if cat == 0 or pd.isna(cat):
+            # Assign 0 demand to all PoD locations after landfall
+            for i in network_processor.V3:
+                for t in network_processor.T_Aft:
+                    demand_processor.d_its[(i, t, 0)] = 0.0
+        else:
+            # Load total demand per PoD location based on hurricane category
+            demand_col = f"I*p_c (cat {cat})"
+            evac_col = "% 1- (Likely to evacuate)"
+            total_demand = demand_processor.pod_info_df[demand_col] * demand_processor.pod_info_df[evac_col]
+            total_demand = total_demand.to_numpy()  # array of shape (num_pods,)
+
+            # Generate time-distribution weights (normal shape)
+            mean = np.mean(network_processor.T_Aft)
+            std = demand_processor.std_pod
+            weights = np.array([
+                np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
+            ])
+            weights /= weights.sum()
+
+            # Assign time-distributed demand to each PoD
+            for idx, i in enumerate(network_processor.V3):
+                for w_idx, t in enumerate(network_processor.T_Aft):
+                    demand_processor.d_its[(i, t, 0)] = total_demand[idx] * weights[w_idx]
+
+    def rh_generate_current_demand(self, t_bar, s_t, network_processor, data):
+        """
+        Generate deterministic shelter-level demand at time t_bar based on the realized hurricane state s_t.
+        Updates self.d_its with demand values for shelters and zero demand for non-shelter locations.
+        """
+        from demand_generation import in_sample, demand_deterministic_landfall, data
+        track_err, intensity = s_t
+
+        # Step 1: Get PoD-level demand based on hurricane state
+        demand_vector = demand_deterministic_landfall(data, track_err, int(intensity), t_bar)
+        scaled_pod_demand = self.population * np.array(demand_vector)
+
+        # Step 2: Distribute demand to shelters using inverse-distance weights
+        demand_df = pd.DataFrame({t_bar: scaled_pod_demand})
+        shelter_demands = self.weights.multiply(demand_df[t_bar], axis=0).sum(axis=0).values
+
+        # Step 3: Store in self.d_its for shelters
+        for shelter_idx, i in enumerate(network_processor.V1):
+            self.d_its[(i, t_bar, s_t)] = shelter_demands[shelter_idx]
+
+        # Step 4: Assign 0 demand to all other (non-shelter) locations
+        for i in range(network_processor.V):
+            if i not in network_processor.V1:
+                self.d_its[(i, t_bar, s_t)] = 0.0
+
+    def rh_generate_future_demand(self, t_bar, s_t, t_L, network_processor, in_sample_paths):
+        """
+        Generate in-sample scenario-based shelter-level demand for t in [t_bar+1, t_L],
+        using the current hurricane state s_t to create scenarios.
+        
+        Updates self.d_its with demand values for all in-sample scenarios.
+        """
+        from demand_generation import in_sample, demand_deterministic_landfall, data
+
+        for s in range(self.num_sce):
+            for t in range(t_bar + 1, t_L + 1):
+                track_err_s, intensity_s = in_sample_paths[s, t]
+
+                demand_vector = demand_deterministic_landfall(data, track_err_s, int(intensity_s), t)
+                scaled_pod_demand = self.population * np.array(demand_vector)
+
+                demand_df = pd.DataFrame({t: scaled_pod_demand})
+                shelter_demands = self.weights.multiply(demand_df[t], axis=0).sum(axis=0).values
+
+                for shelter_idx, i in enumerate(network_processor.V1):
+                    self.d_its[(i, t, s)] = shelter_demands[shelter_idx]
+
+                for i in range(network_processor.V):
+                    if i not in network_processor.V1:
+                        self.d_its[(i, t, s)] = 0.0
+
+    def rh_generate_post_landfall_demand(self, t_L, in_sample_paths, network_processor):
+        """
+        Generate deterministic PoD-level demand for t > t_L (i.e., post-landfall),
+        based on hurricane category at landfall time for each in-sample scenario.
+
+        Updates self.d_its with demand values for PoD and non-PoD locations.
+        """
+        for s in range(self.num_sce):
+            track_err_L, hurr_cat_L = in_sample_paths[s, t_L]
+            cat = int(hurr_cat_L)
+
+            if cat == 0 or pd.isna(cat):
+                for i in network_processor.V3:
+                    for t in network_processor.T_Aft:
+                        self.d_its[(i, t, s)] = 0.0
+            else:
+                demand_col = f"I*p_c (cat {cat})"
+                evac_col = "% 1- (Likely to evacuate)"
+                total_demand = self.pod_info_df[demand_col] * self.pod_info_df[evac_col]
+                total_demand = total_demand.to_numpy()
+
+                mean = np.mean(network_processor.T_Aft)
+                std = self.std_pod
+                weights = np.array([
+                    np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
+                ])
+                weights /= weights.sum()
+
+                for idx, i in enumerate(network_processor.V3):
+                    for w_idx, t in enumerate(network_processor.T_Aft):
+                        if (i, t) not in self.d_its:
+                            self.d_its[(i, t)] = total_demand[idx] * weights[w_idx]
+
+                # Ensure zero demand for non-PoD locations
+                for i in range(network_processor.V):
+                    if i not in network_processor.V3:
+                        for t in network_processor.T_Aft:
+                            if (i, t) not in self.d_its:
+                                self.d_its[(i, t)] = 0.0
+
     def generate_in_sample_demand(self, num_sce, network_processor, output_dir="csv_by_location"):
         """
         Generates in-sample demand based on hurricane track and category,
@@ -68,7 +220,7 @@ class DemandData:
         Returns:
             in_sample_data: Array of in-sample hurricane states
         """
-        from demand_homa import in_sample, demand_deterministic_landfall, data  # Local import
+        from demand_generation import in_sample, demand_deterministic_landfall, data  # Local import
 
         if self.population is None:
             raise ValueError("Population data not loaded. Call load_oos_inputs() first.")
@@ -112,7 +264,7 @@ class DemandData:
         Returns:
             dict: Shelter demand dictionary {(i, t): value} for i ∈ V1, t ∈ T_Bef.
         """
-        from demand_homa import demand_deterministic_landfall, data
+        from demand_generation import demand_deterministic_landfall, data
 
         if self.population is None or self.weights is None:
             raise ValueError("Population and weights must be loaded first using load_oos_inputs()")
@@ -195,7 +347,7 @@ class DemandData:
         Returns:
             dict: Full OOS demand dictionary {(i, t): demand}
         """
-        from demand_homa import data  # Access test_samples_from_tree
+        from demand_generation import data  # Access test_samples_from_tree
 
         # Generate shelter demand (for i in V1, t in T_Bef)
         shelter_demand = self.generate_oos_shelter_demand(path, network_processor)

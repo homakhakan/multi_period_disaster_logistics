@@ -18,7 +18,7 @@ os.chdir(friend_dir)
 sys.path.append(friend_dir)
 
 from data_main import Data
-from demand_homa import in_sample, demand_deterministic_landfall, data
+from demand_generation import in_sample, demand_deterministic_landfall, data
 import commands
 import helper
 
@@ -55,6 +55,7 @@ if __name__ == "__main__":
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
     # ----------- Simulated In-Sample Demand Setup ------------
+    # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     print("\nGenerating in-sample demand...")
     demand_processor.load_oos_inputs(population_file="PoD location information.xlsx", distance_file="distanceFull-podtoshelter.xlsx", network_processor=network_processor)
     demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor)
@@ -86,6 +87,14 @@ if __name__ == "__main__":
         start_time_ext = time.time()
         ext_model, I_vars = ext_model_instance.ext_model()
         ext_model.optimize()
+
+        # print("\n📦 First-stage inventory variables (I_ir0):")
+        # for i in range(network_processor.V):
+        #     for r in range(network_processor.R):
+        #         value = I_vars[i, r, 0].X  # Access value at time t = 0
+        #         if value > 1e-4:  # Only show nonzero inventory (optional)
+        #             print(f"I[{i}, {r}, 0] = {value:.2f}")
+
         end_time_ext = time.time()
         total_time_ext = end_time_ext - start_time_ext
 
@@ -94,7 +103,16 @@ if __name__ == "__main__":
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
             output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="ext_results.xlsx")
             
-            fixed_I_ir0 = ext_model_instance.extract_first_stage(I_vars)
+            #fixed_I_ir0 = ext_model_instance.extract_first_stage(I_vars)
+            fixed_I_irt = ext_model_instance.extract_all_inventory(I_vars)
+
+            # ✅ Save to JSON
+            import json
+            with open("fixed_I_irt.json", "w") as f:
+                json.dump({str(k): v for k, v in fixed_I_irt.items()}, f, indent=2)
+
+            # Optional: print or log summary
+            print("✔ Saved fixed inventory values for all (i, r, t)")
 
         else:
             print("\nModel did not solve to optimality.")
@@ -103,24 +121,52 @@ if __name__ == "__main__":
 
     if args.eval_oos:
 
-        if 'fixed_I_ir0' not in locals():
+        if 'fixed_I_irt' not in locals():
             raise RuntimeError("You must solve the model once, before running OOS evaluation.")        
 
-        # -------- OOS Evaluation --------------------
+        # -------- OOS Evaluation for Static 2SSP --------------------
         print("\nStarting OOS evaluation...")
         total_costs = []
 
         # Load inputs once
         demand_processor.load_oos_inputs(population_file="PoD location information.xlsx", distance_file="distanceFull-podtoshelter.xlsx", network_processor=network_processor)
 
-        for path in range(args.num_oos):
-            oos_demand = demand_processor.generate_full_oos_demand(path, network_processor)
-            #save_full_oos_demand(oos_demand, network_processor, output_file=f"outputs/oos_path_{path}.xlsx")
-            cost = ext_model_instance.OOS_2SSP(fixed_I_ir0, oos_demand)
-            total_costs.append(cost)
-            print(f"OOS Scenario {path}: Cost = {cost:.2f}")
+        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/real_sample_paths_new.csv"
+        
+        # Load OOS sample paths (CSV)
+        OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths_new.csv"
+        OS_paths = OS_paths_df.values
 
-        print(f"\nAverage OOS Cost over {args.num_oos} scenarios: {np.mean(total_costs):.2f}")
+        # Compute landfall time once
+        t_L = max(network_processor.T_Bef)
+
+        for k in range(args.num_oos):
+            print(f"\n🔁 OOS Scenario {k}")
+            sample_path_row = OS_paths[k]
+
+            # Step 1: Clear previous demand
+            demand_processor.d_its = {}
+            
+            # Step 2: Generate full deterministic demand
+            demand_processor.pre_landfall_demand_S_2SSP(sample_path_row, network_processor, demand_processor, t_L)
+            demand_processor.post_landfall_demand_S_2SSP(sample_path_row, network_processor, demand_processor, t_L)
+
+            # Fill in missing keys
+            for i in range(network_processor.V):
+                for t in range(network_processor.T):
+                    if (i, t, 0) not in demand_processor.d_its:
+                        demand_processor.d_its[(i, t, 0)] = 0.0
+
+            # Step 3: Solve deterministic second-stage model with fixed I
+            cost = ext_model_instance.OOS_2SSP(fixed_I_irt)
+            total_costs.append(cost)
+            print(f"   ➤ Cost = {cost:.2f}")
+
+        # Final summary
+        avg_cost = np.mean(total_costs)
+        print(f"\n✅ Average OOS Cost over {args.num_oos} scenarios: {avg_cost:.2f}")
+
+        # Save to Excel
         output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, output_filename="oos_2SSP_results.xlsx")
 
     elif args.solution_method == 2:
@@ -169,7 +215,7 @@ if __name__ == "__main__":
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/real_sample_paths.csv"  # <-- Update with actual path
+        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/real_sample_paths_new.csv"  # <-- Update with actual path
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation(

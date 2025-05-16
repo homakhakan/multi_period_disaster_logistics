@@ -4,16 +4,17 @@ import pandas as pd
 import numpy as np
 from demand_data import DemandData
 import time
+import os
 
 ### Extended
 class TwoStageSPModel:
     def __init__(self, network_processor, demand_processor, num_sce):
         self.network_processor = network_processor  # Store network data
         self.demand_processor = demand_processor  # Store demand data
-        if not hasattr(self.demand_processor, 'd_its_original'):
-            self.demand_processor.d_its_original = self.demand_processor.d_its
-        if not hasattr(self.demand_processor, 'P_original'):
-            self.demand_processor.P_original = self.demand_processor.P.copy()
+        # if not hasattr(self.demand_processor, 'd_its_original'):
+        #     self.demand_processor.d_its_original = self.demand_processor.d_its
+        # if not hasattr(self.demand_processor, 'P_original'):
+        #     self.demand_processor.P_original = self.demand_processor.P.copy()
 
         self.num_sce = num_sce  # Use full scenarios for other models
 
@@ -27,9 +28,9 @@ class TwoStageSPModel:
             self.demand_processor.P = [1]
             self.num_sce = 1
         else:
-            self.demand_processor.d_its = self.demand_processor.d_its_original
-            self.demand_processor.P = self.demand_processor.P_original
-            self.num_sce = len(self.demand_processor.P_original)
+            # self.demand_processor.d_its = self.demand_processor.d_its_original
+            # self.demand_processor.P = self.demand_processor.P_original
+            self.num_sce = len(self.demand_processor.P)
 
         m = gp.Model("Two-Stage Stochastic Programming Model")
 
@@ -209,48 +210,74 @@ class TwoStageSPModel:
         m.update()
         return m, I
     
-    def OOS_2SSP(self, fixed_I_ir0, demand_dict):
+    # def OOS_2SSP(self, fixed_I_ir0):
+    #     """
+    #     Evaluate the deterministic second-stage cost for a single OOS demand scenario.
+    #     """
+    #     # Setup for deterministic evaluation
+    #     self.num_sce = 1
+    #     self.demand_processor.P = [1]
 
+    #     # Set fixed first-stage inventory
+    #     self.network_processor.I_ir0 = fixed_I_ir0
+
+    #     # Build and solve the model
+    #     model, _ = self.ext_model(is_mvp=False)
+    #     model.optimize()
+
+    #     if model.status == GRB.OPTIMAL:
+    #         return model.objVal
+    #     else:
+    #         print(f"[Warning] Model not optimal. Status: {model.status}")
+    #         return float("inf")
+
+    # def extract_first_stage(self, I_vars):
+    #     fixed_I_ir0 = {}
+    #     for i in range(self.network_processor.V):
+    #         fixed_I_ir0[i] = {}
+    #         for r in range(self.network_processor.R):
+    #             fixed_I_ir0[i][r] = I_vars[i, r, 0].X
+    #     return fixed_I_ir0
+
+    def OOS_2SSP(self, fixed_I_irt):
         """
-    Evaluate the deterministic second-stage cost for a single OOS demand scenario.
+        Evaluate the deterministic second-stage cost for a single OOS demand scenario,
+        by fixing all inventory variables I[i, r, t] to values from the static solution.
 
-    Args:
-        fixed_I_ir0 (dict): Fixed inventory levels from first-stage solution, indexed by (i, r)
-        demand_dict (dict): One scenario's demand values indexed by (i, t)
+        Args:
+            fixed_I_irt (dict): Dictionary of inventory values {(i, r, t): value}
 
-    Returns: Total cost from solving the deterministic model
-    """
-        # Set number of scenarios to 1
+        Returns:
+            float: Total cost from solving the model
+        """
+        # Setup for deterministic single-scenario evaluation
         self.num_sce = 1
-        self.demand_processor.P = [1]  # Only one scenario
-        self.demand_processor.P_original = [1]
+        self.demand_processor.P = [1]
 
-        # Convert demand_dict to proper format: (i, t, s) where s = 0
-        d_its_oos = {(i, t, 0): demand_dict[(i, t)] for (i, t) in demand_dict}
-        self.demand_processor.d_its = d_its_oos
-        self.demand_processor.d_its_original = d_its_oos
+        # Build the model (variables are free initially)
+        model, I_vars = self.ext_model(is_mvp=False)
 
-        # Fix first-stage inventory
-        self.network_processor.I_ir0 = fixed_I_ir0
+        # Fix each I[i, r, t] to its corresponding value using equality constraints
+        for (i, r, t), val in fixed_I_irt.items():
+            model.addConstr(I_vars[i, r, t] == val, name=f"fix_I_{i}_{r}_{t}")
 
-        # Build and solve the model
-        model, _ = self.ext_model(is_mvp=False)
+        # Solve the model
         model.optimize()
 
-        # Return the objective value if solved optimally
+        # Return objective value if solved successfully
         if model.status == GRB.OPTIMAL:
             return model.objVal
         else:
             print(f"[Warning] Model not optimal. Status: {model.status}")
+            return float("inf")
 
-    def extract_first_stage(self, I_vars):
-        fixed_I_ir0 = {}
+    def extract_all_inventory(self, I_vars):
+        inventory_values = {}
         for i in range(self.network_processor.V):
-            fixed_I_ir0[i] = {}
             for r in range(self.network_processor.R):
-                fixed_I_ir0[i][r] = I_vars[i, r, 0].X
-        return fixed_I_ir0
-
+                for t in range(self.network_processor.T):
+                    inventory_values[(i, r, t)] = I_vars[i, r, t].X
+        return inventory_values
 
     def RH_model_creator(self, t_bar, sol):
 
@@ -494,17 +521,13 @@ class TwoStageSPModel:
         # Return everything
         return obj_val, variable_values
 
-    def RH_sol_creator(self, variable_values, t_bar, network_processor, sample_paths):
-        
-        # Extracts inventory and unmet demand values at time t_bar + 1 from the solved model for the realized scenario. 
-        # Updates the solution dictionary (sol) with these values and returns it
-        # Used for initializing the next rolling horizon stage.
-            
+    def RH_sol_creator(self, variable_values, t_bar, s_realized):
+        """
+        Extracts inventory and unmet demand values at time t_bar + 1 from the solved model for the realized scenario. 
+        Updates the solution dictionary (sol) with these values and returns it
+        Used for initializing the next rolling horizon stage.
+        """
         sol = {}
-
-        # Realized scenario at current time
-        s_t = sample_paths[t_bar]
-        T = network_processor.T
 
         next_t = t_bar + 1
 
@@ -519,7 +542,7 @@ class TwoStageSPModel:
         sol["U"] = {
             (i, next_t): val
             for (i, t, s), val in variable_values["U"].items()
-            if t == next_t and s == s_t
+            if t == next_t and s == s_realized
         }
 
         return sol
@@ -550,9 +573,6 @@ class TwoStageSPModel:
         m_ij = self.network_processor.m_ij
         sce = range(self.num_sce)
         t_L = self.network_processor.t_L
-
-        # Realized scenario at terminal stage
-        s_t = sample_paths[t_L]
 
         # Create the model
         model = gp.Model("Terminal_Model")
@@ -620,7 +640,7 @@ class TwoStageSPModel:
                         incoming_flow_fixed = gp.quicksum(
                         self.fixed_flow_all.get((j, i, r, t_prime), 0)
                         for j in range(V)
-                        for t_prime in range(t_L)  # Flows made before t_bar
+                        for t_prime in range(t_L)  # Flows made before t_L
                         if (j, i) in A and t_prime + (t_ijt[j][i] + 1) == t)
 
                         total_incoming = incoming_flow_regular + incoming_flow_fixed
@@ -646,7 +666,7 @@ class TwoStageSPModel:
         for i in range(V):
             for t in range(t_L + 2, T):  # T is exclusive in range, so this covers t = t_L+2 to T-1
                 model.addConstr(
-                    U[i, t] == U[i, t - 1] - S[i, t] + self.demand_processor.d_its[(i, t, s_t)], # realized demand using s_t
+                    U[i, t] == U[i, t - 1] - S[i, t] + self.demand_processor.d_its[(i, t)], # realized demand using s_t
                     name=f"DemandShortageUpdate_Terminal_{i}_{t}")
 
         for i in range(V):
@@ -745,6 +765,7 @@ class TwoStageSPModel:
 
         Returns the average cost and the individual total costs for all sample paths.
         """
+        from demand_generation import data, in_sample
 
         T = network_processor.T
         P = self.demand_processor.P
@@ -756,14 +777,19 @@ class TwoStageSPModel:
         t_L = network_processor.t_L
 
         start_time = time.time()
+
+        # Ensure PoD location info is loaded (used for post-landfall PoD demand)
+        if not hasattr(demand_processor, "pod_info_df"):
+            demand_processor.pod_info_df = pd.read_excel("PoD location information.xlsx", sheet_name="Sheet1")
+
         # Load sample paths from CSV
-        OS_paths = pd.read_csv(sample_paths).values
-        T = OS_paths.shape[1]
+        OS_paths_df = pd.read_csv(sample_paths)
+        OS_paths = OS_paths_df.values
         total_costs = np.zeros(nbOS)  # Total cost for each sample path
 
         for k in range(nbOS):
             print("Sample path=", k)
-            sample_paths = OS_paths[k]  # 1D array for path k
+            sample_path_row = OS_paths[k]  # 1D array for path k
             self.fixed_flow_all = {}
             t_bar = 0
             sol = {}  # Initial state
@@ -772,8 +798,103 @@ class TwoStageSPModel:
             # Rolling loop over time steps
             while t_bar <= t_L:
                 print("t_bar=", t_bar)
-                s_t = sample_paths[t_bar]  # Realized scenario at current time
+                s_t = eval(sample_path_row[t_bar])  # Converts '(-23.55, 0)' to (-23.55, 0)
 
+                # Generate the demand at t_bar only based on the realized current state of the hurricane
+                demand_processor.rh_generate_current_demand(t_bar, s_t, network_processor, data)
+
+                # # Create folder if it doesn't exist
+                # os.makedirs("RH demand check", exist_ok=True)
+
+                # # Prepare DataFrame
+                # shelter_demand = {
+                #     "Location": [],
+                #     "Demand": []
+                # }
+                # for i in network_processor.V1:
+                #     val = demand_processor.d_its.get((i, t_bar, s_t), 0)
+                #     shelter_demand["Location"].append(i)
+                #     shelter_demand["Demand"].append(val)
+
+                # df_shelter_demand = pd.DataFrame(shelter_demand)
+
+                # # Create a clean name for the file using t_bar and s_t
+                # s_str = f"{s_t[0]:.2f}_{s_t[1]}"
+                # file_name = f"RH_demand_t{t_bar}_s{s_str}.xlsx"
+
+                # # Save to Excel
+                # df_shelter_demand.to_excel(f"RH demand check/{file_name}", index=False)
+                # print(f"✅ Saved shelter demand for t_bar={t_bar}, s_t={s_t} → {file_name}")
+
+                # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
+                # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
+                in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
+
+                # Identify which in-sample scenario matches the realized state s_t
+                s_realized = None
+                for s in range(self.num_sce):
+                    if tuple(in_sample_paths[s, t_bar]) == s_t:
+                        s_realized = s
+                        break
+
+                if s_realized is None:
+                    raise ValueError(f"No in-sample scenario matches realized state s_t = {s_t} at t_bar = {t_bar}")
+
+                # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
+                demand_processor.rh_generate_future_demand(t_bar, s_t, t_L, network_processor, in_sample_paths)  
+
+                # # Create folder if it doesn't exist
+                # os.makedirs("RH demand check/future", exist_ok=True)
+
+                # # Define output path
+                # file_path = f"RH demand check/future/RH_demand_future_t{t_bar}_s{s_t[0]:.2f}_{s_t[1]}.xlsx"
+
+                # # Save scenario-based future demand to multiple sheets
+                # with pd.ExcelWriter(file_path) as writer:
+                #     for s in range(self.num_sce):
+                #         data_rows = []
+                #         for t in range(t_bar + 1, t_L + 1):
+                #             for i in network_processor.V1:
+                #                 val = demand_processor.d_its.get((i, t, s), 0.0)
+                #                 data_rows.append({
+                #                     "Time": t,
+                #                     "Location": i,
+                #                     "Demand": val
+                #                 })
+
+                #         df = pd.DataFrame(data_rows)
+                #         df.to_excel(writer, sheet_name=f"Scenario_{s}", index=False)
+
+                # print(f"✅ Future demand saved for t_bar={t_bar}, s_t={s_t} → {file_path}")             
+
+                # PoD demands for t > t_L based on hurricane category at t_L in this in-sample path
+                demand_processor.rh_generate_post_landfall_demand(t_L, in_sample_paths, network_processor)
+
+                # # Create folder for post-landfall demand
+                # os.makedirs("RH demand check/post_landfall", exist_ok=True)
+
+                # # File path
+                # post_file_path = f"RH demand check/post_landfall/RH_postlandfall_t{t_bar}_s{s_t[0]:.2f}_{s_t[1]}.xlsx"
+
+                # # Save post-landfall demand to Excel
+                # with pd.ExcelWriter(post_file_path) as writer:
+                #     for s in range(self.num_sce):
+                #         records = []
+                #         for t in network_processor.T_Aft:
+                #             for i in network_processor.V3:
+                #                 val = demand_processor.d_its.get((i, t, s), 0.0)
+                #                 records.append({
+                #                     "Time": t,
+                #                     "PoD": i,
+                #                     "Demand": val
+                #                 })
+
+                #         df_post = pd.DataFrame(records)
+                #         df_post.to_excel(writer, sheet_name=f"Scenario_{s}", index=False)
+
+                # print(f"✅ Post-landfall demand saved for t_bar={t_bar}, s_t={s_t} → {post_file_path}")
+
+                    
                 # Build the model for current roll
                 model, I, U, S, f = self.RH_model_creator(t_bar, sol)
                 
@@ -793,7 +914,7 @@ class TwoStageSPModel:
                         self.fixed_flow_all[(i, j, r, t, s)] = val
                 
                 # Update the rolling state for next time step (should be before model creation, because we need updated sol to create the model every time)
-                sol = self.RH_sol_creator(variable_values, t_bar, network_processor, sample_paths)
+                sol = self.RH_sol_creator(variable_values, t_bar, s_realized)
 
                 # Advance to the next time step
                 t_bar += 1
