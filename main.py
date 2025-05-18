@@ -10,29 +10,33 @@ import yaml
 from shapely.geometry import Point, LineString
 import math
 
-# --- Temporarily switch to your friend's directory to allow imports and file reads ---
-friend_dir = "C:/Users/hkhakan/OneDrive - Clemson University/Documents/GitHub/MSSP_IHRLEP_Networks"
-my_dir = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new"
+# === Setup to use Sudhan's repo ===
 
-os.chdir(friend_dir)
+# Step 1: Define repo path (relative)
+friend_dir = os.path.join(os.path.dirname(__file__), "MSSP_IHRLEP_Networks")
+
+# Step 2: Add it to sys.path to allow imports
 sys.path.append(friend_dir)
 
+# Step 3: Temporarily set working directory to Sudhan's repo
+os.chdir(friend_dir)
+
+# Step 4: Import from external code
 from data_main import Data
 from demand_generation import in_sample, demand_deterministic_landfall, data
 import commands
 import helper
 
-# --- Switch back to your own working directory ---
-os.chdir(my_dir)
+# Step 5: Switch back to original repo root
+os.chdir(os.path.dirname(__file__))
 
-# --- Now import your own modules ---
+# === My own project modules ===
 from demand_data import DemandData
 from network_data import NetworkData
 from model import TwoStageSPModel
 from method import benders
 import output
 from output import save_full_oos_demand
-os.makedirs("outputs", exist_ok=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -48,21 +52,24 @@ if __name__ == "__main__":
     with open("fixed_params.yaml", "r") as f:
         params = yaml.safe_load(f)
 
+    thetaLB = float(params["THETA_LB"])
+    eps = float(params["EPS"])
+
     network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters()
 
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
-    # ----------- Simulated In-Sample Demand Setup ------------
+    # ----------- Simulated In-Sample Demand Setup for static 2SSP------------
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     print("\nGenerating in-sample demand...")
-    demand_processor.load_oos_inputs(population_file="PoD location information.xlsx", distance_file="distanceFull-podtoshelter.xlsx", network_processor=network_processor)
-    demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor)
-    demand_processor.allocate_demand(demand_files = [f"csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Shelter_Demand.xlsx", network_processor=network_processor)
-    demand_processor.calculate_landfall_demand(wind_speed_file="LandfallStates.xlsx", pod_info_file="PoD location information.xlsx", output_file="POD_Demand_total.xlsx")
-    demand_processor.distribute_demand_by_time(total_demand_file="PoD_Demand_total.xlsx", network_processor=network_processor, output_file="POD_Demand.xlsx")
-    demand_processor.combine_demand_data(shelter_file="Shelter_Demand.xlsx",pod_file="POD_Demand.xlsx", network_processor=network_processor, output_file="demand_data_dynamic.xlsx")
+    demand_processor.load_oos_inputs(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+    demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, output_dir="Generated data/csv_by_location")
+    demand_processor.allocate_demand(demand_files = [f"Generated data/csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Generated data/Shelter_Demand.xlsx", network_processor=network_processor)
+    demand_processor.calculate_landfall_demand(wind_speed_file="Generated data/LandfallStates.xlsx", pod_info_file="Data/PoD location information.xlsx", output_file="Generated data/POD_Demand_total.xlsx")
+    demand_processor.distribute_demand_by_time(total_demand_file="Generated data/PoD_Demand_total.xlsx", network_processor=network_processor, output_file="Generated data/POD_Demand.xlsx")
+    demand_processor.combine_demand_data(shelter_file="Generated data/Shelter_Demand.xlsx",pod_file="Generated data/POD_Demand.xlsx", network_processor=network_processor, output_file="Generated data/demand_data_dynamic.xlsx")
     demand_processor.generate_scenario_data()
     demand_processor.load_demand_data()
 
@@ -85,15 +92,9 @@ if __name__ == "__main__":
     if args.solution_method == 1:
         ext_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         start_time_ext = time.time()
+
         ext_model, I_vars = ext_model_instance.ext_model()
         ext_model.optimize()
-
-        # print("\n📦 First-stage inventory variables (I_ir0):")
-        # for i in range(network_processor.V):
-        #     for r in range(network_processor.R):
-        #         value = I_vars[i, r, 0].X  # Access value at time t = 0
-        #         if value > 1e-4:  # Only show nonzero inventory (optional)
-        #             print(f"I[{i}, {r}, 0] = {value:.2f}")
 
         end_time_ext = time.time()
         total_time_ext = end_time_ext - start_time_ext
@@ -101,19 +102,9 @@ if __name__ == "__main__":
         # Print and save results
         if ext_model.Status == gp.GRB.OPTIMAL:
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
-            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="ext_results.xlsx")
+            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="Results/ext_results.xlsx")
             
-            #fixed_I_ir0 = ext_model_instance.extract_first_stage(I_vars)
             fixed_I_irt = ext_model_instance.extract_all_inventory(I_vars)
-
-            # ✅ Save to JSON
-            import json
-            with open("fixed_I_irt.json", "w") as f:
-                json.dump({str(k): v for k, v in fixed_I_irt.items()}, f, indent=2)
-
-            # Optional: print or log summary
-            print("✔ Saved fixed inventory values for all (i, r, t)")
-
         else:
             print("\nModel did not solve to optimality.")
 
@@ -129,9 +120,9 @@ if __name__ == "__main__":
         total_costs = []
 
         # Load inputs once
-        demand_processor.load_oos_inputs(population_file="PoD location information.xlsx", distance_file="distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+        demand_processor.load_oos_inputs(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
 
-        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/real_sample_paths_new.csv"
+        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/Data/real_sample_paths_new.csv"
         
         # Load OOS sample paths (CSV)
         OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths_new.csv"
@@ -167,7 +158,7 @@ if __name__ == "__main__":
         print(f"\n✅ Average OOS Cost over {args.num_oos} scenarios: {avg_cost:.2f}")
 
         # Save to Excel
-        output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, output_filename="oos_2SSP_results.xlsx")
+        output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, output_filename="Results/oos_2SSP_results.xlsx")
 
     elif args.solution_method == 2:
         benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
@@ -179,13 +170,13 @@ if __name__ == "__main__":
         end_time_benders = time.time()
         total_time_benders = end_time_benders - start_time_benders
 
-        output.benders_results(args.instance_version, args.num_sce, total_time_benders, LB, UB, output_filename="benders_results.xlsx")
+        output.benders_results(args.instance_version, args.num_sce, total_time_benders, LB, UB, output_filename="Results/benders_results.xlsx")
         print(f"Total Execution Time for Benders: {total_time_benders:.2f} seconds")
 
     elif args.solution_method == 3:
         demand_processor.compute_expected_demand()
         mvp_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
-        mvp_model = mvp_model_instance.ext_model(is_mvp=True)
+        mvp_model, _ = mvp_model_instance.ext_model(is_mvp=True)
         start_time_mvp = time.time()
         mvp_model.optimize()
         print(f"\n MVP Model Objective Value: {mvp_model.ObjVal}")
@@ -209,13 +200,13 @@ if __name__ == "__main__":
         end_time_mvp = time.time()
         total_time_mvp = end_time_mvp - start_time_mvp
         print(f"Total Execution Time for MVP: {total_time_mvp:.2f} seconds")
-        output.mvp_results(args.instance_version, args.num_sce, total_time_mvp, mvp_obj_value, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="mvp_results.xlsx")
+        output.mvp_results(args.instance_version, args.num_sce, total_time_mvp, mvp_obj_value, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="Results/mvp_results.xlsx")
 
     elif args.solution_method == 4:
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/real_sample_paths_new.csv"  # <-- Update with actual path
+        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/Data/real_sample_paths_new.csv"  # <-- Update with actual path
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation(
@@ -236,5 +227,5 @@ if __name__ == "__main__":
             total_time=total_time_rh,
             average_cost=avg_cost,
             path_costs=total_costs,
-            output_filename="rh_results.xlsx"
+            output_filename="Results/rh_results.xlsx"
         )

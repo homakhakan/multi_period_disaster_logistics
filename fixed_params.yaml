@@ -1,3 +1,29 @@
-TPERIOD: 12
+# Network
+TPERIOD: 12 # Time discretization in hours
+T_BEF: 10 # Time periods before landfall (T_Bef)
+MILES_TO_METERS: 0.000621371
+
+OPEN_COST_KEYS: ["Open Cost V0", "Open Cost V1", "Open Cost V2", "Open Cost V3"]
+
+INVENTORY_COLUMNS:
+  original: ["S-Kit StartInv", "P-Kit StartInv", "Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
+  largesize: ["S-Kit StartInv", "P-Kit StartInv", "Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
+  smallsize: ["Water StartInv"]
+  mediumsize: ["Water StartInv", "Blanket StartInv"]
+
+
+
+
+
+# Normal distribution params related to distributing total PoD demand 
+std_pod: 1
+
+
+# For sensitivity analysis
+MULTIPLIER1: 1 # Penalty cost multiplier
+MULTIPLIER2: 1 # Travel cost multiplier
+MULTIPLIER3: 1 # Arc capacity multiplier
+
+# Benders config
 THETA_LB: 0
 EPS: 1e-5

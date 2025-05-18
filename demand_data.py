@@ -19,7 +19,7 @@ class DemandData:
     def generate_scenario_data(self):
         self.sce = list(range(self.num_sce))  # Generate scenario indices
         self.P = [1 / self.num_sce] * self.num_sce  # Generate equal probabilities
-        self.demand_file = "demand_data_dynamic.xlsx"  # Demand file name
+        self.demand_file = "Generated data/demand_data_dynamic.xlsx"  # Demand file name
         self.sheet_names = [f"Scenario_{i}" for i in self.sce]  # Sheet names
 
     def load_demand_data(self):
@@ -212,6 +212,7 @@ class DemandData:
                             if (i, t) not in self.d_its:
                                 self.d_its[(i, t)] = 0.0
 
+    
     def generate_in_sample_demand(self, num_sce, network_processor, output_dir="csv_by_location"):
         """
         Generates in-sample demand based on hurricane track and category,
@@ -407,7 +408,7 @@ class DemandData:
 
         print(f"✅ Demand allocation completed. File saved: {output_file}")
 
-    def save_landfall_states(self, in_sample_data, network_processor, output_file="LandfallStates.xlsx"):
+    def save_landfall_states(self, in_sample_data, network_processor, output_file="Generated data/LandfallStates.xlsx"):
         """
         Extract hurricane track and category at time of landfall and save to Excel.
 

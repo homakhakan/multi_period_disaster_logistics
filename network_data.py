@@ -51,13 +51,13 @@ class NetworkData:
     def get_file_paths(self):
     
         self.file_paths = {
-            "location_file": f"fullDist Set V Data Location-{self.instance_version}.xlsx",
-            "county_file": f"fullDist Set C Data-{self.instance_version}.xlsx",
-            "resource_file": f"fullDist R-{self.instance_version}.xlsx",
-            "time_matrix_file": f"durationFull-{self.instance_version}.txt",
-            "distance_matrix_file": f"distanceFull-{self.instance_version}.txt",
-            "inputs_file": f"fullDistInputs-{self.instance_version}.xlsx",
-            "k_ijt_file": f"K_ijt_data_fixed-{self.instance_version}.xlsx",
+            "location_file": f"Data/fullDist Set V Data Location-{self.instance_version}.xlsx",
+            "county_file": f"Data/fullDist Set C Data-{self.instance_version}.xlsx",
+            "resource_file": f"Data/fullDist R-{self.instance_version}.xlsx",
+            "time_matrix_file": f"Data/durationFull-{self.instance_version}.txt",
+            "distance_matrix_file": f"Data/distanceFull-{self.instance_version}.txt",
+            "inputs_file": f"Data/fullDistInputs-{self.instance_version}.xlsx",
+            "k_ijt_file": f"Data/K_ijt_data_fixed-{self.instance_version}.xlsx",
         }
 
     def define_sets(self):
@@ -160,7 +160,7 @@ class NetworkData:
         # print("\nt_ijt matrix with variation saved to t_ijt_matrix_randomized.csv")
 
         # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
-        self.t_ijt = pd.read_csv("t_ijt_matrix_randomized.csv").values.tolist()
+        self.t_ijt = pd.read_csv("Data/t_ijt_matrix_randomized.csv").values.tolist()
 
         # Truck delay per location
         self.h_i = self.df_V['TruckDelay'].tolist()

@@ -209,35 +209,6 @@ class TwoStageSPModel:
         m.setParam("OutputFlag", 0)
         m.update()
         return m, I
-    
-    # def OOS_2SSP(self, fixed_I_ir0):
-    #     """
-    #     Evaluate the deterministic second-stage cost for a single OOS demand scenario.
-    #     """
-    #     # Setup for deterministic evaluation
-    #     self.num_sce = 1
-    #     self.demand_processor.P = [1]
-
-    #     # Set fixed first-stage inventory
-    #     self.network_processor.I_ir0 = fixed_I_ir0
-
-    #     # Build and solve the model
-    #     model, _ = self.ext_model(is_mvp=False)
-    #     model.optimize()
-
-    #     if model.status == GRB.OPTIMAL:
-    #         return model.objVal
-    #     else:
-    #         print(f"[Warning] Model not optimal. Status: {model.status}")
-    #         return float("inf")
-
-    # def extract_first_stage(self, I_vars):
-    #     fixed_I_ir0 = {}
-    #     for i in range(self.network_processor.V):
-    #         fixed_I_ir0[i] = {}
-    #         for r in range(self.network_processor.R):
-    #             fixed_I_ir0[i][r] = I_vars[i, r, 0].X
-    #     return fixed_I_ir0
 
     def OOS_2SSP(self, fixed_I_irt):
         """
@@ -624,7 +595,7 @@ class TwoStageSPModel:
                     for t in range(t_L + 1, T - 1):
                         outgoing_flow = gp.quicksum(f[i, j, r, t] for j in range(V) if (i, j) in A)
                         
-                        # Regular incoming flow (from inside RH window)
+                        # # Regular incoming flow (from inside RH window)
                         # incoming_flow_regular = gp.quicksum(
                         #     f[j, i, r, t - (t_ijt[j][i] + 1)]
                         #     for j in range(V)
@@ -803,29 +774,6 @@ class TwoStageSPModel:
                 # Generate the demand at t_bar only based on the realized current state of the hurricane
                 demand_processor.rh_generate_current_demand(t_bar, s_t, network_processor, data)
 
-                # # Create folder if it doesn't exist
-                # os.makedirs("RH demand check", exist_ok=True)
-
-                # # Prepare DataFrame
-                # shelter_demand = {
-                #     "Location": [],
-                #     "Demand": []
-                # }
-                # for i in network_processor.V1:
-                #     val = demand_processor.d_its.get((i, t_bar, s_t), 0)
-                #     shelter_demand["Location"].append(i)
-                #     shelter_demand["Demand"].append(val)
-
-                # df_shelter_demand = pd.DataFrame(shelter_demand)
-
-                # # Create a clean name for the file using t_bar and s_t
-                # s_str = f"{s_t[0]:.2f}_{s_t[1]}"
-                # file_name = f"RH_demand_t{t_bar}_s{s_str}.xlsx"
-
-                # # Save to Excel
-                # df_shelter_demand.to_excel(f"RH demand check/{file_name}", index=False)
-                # print(f"✅ Saved shelter demand for t_bar={t_bar}, s_t={s_t} → {file_name}")
-
                 # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
                 # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
                 in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
@@ -843,57 +791,7 @@ class TwoStageSPModel:
                 # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
                 demand_processor.rh_generate_future_demand(t_bar, s_t, t_L, network_processor, in_sample_paths)  
 
-                # # Create folder if it doesn't exist
-                # os.makedirs("RH demand check/future", exist_ok=True)
-
-                # # Define output path
-                # file_path = f"RH demand check/future/RH_demand_future_t{t_bar}_s{s_t[0]:.2f}_{s_t[1]}.xlsx"
-
-                # # Save scenario-based future demand to multiple sheets
-                # with pd.ExcelWriter(file_path) as writer:
-                #     for s in range(self.num_sce):
-                #         data_rows = []
-                #         for t in range(t_bar + 1, t_L + 1):
-                #             for i in network_processor.V1:
-                #                 val = demand_processor.d_its.get((i, t, s), 0.0)
-                #                 data_rows.append({
-                #                     "Time": t,
-                #                     "Location": i,
-                #                     "Demand": val
-                #                 })
-
-                #         df = pd.DataFrame(data_rows)
-                #         df.to_excel(writer, sheet_name=f"Scenario_{s}", index=False)
-
-                # print(f"✅ Future demand saved for t_bar={t_bar}, s_t={s_t} → {file_path}")             
-
-                # PoD demands for t > t_L based on hurricane category at t_L in this in-sample path
                 demand_processor.rh_generate_post_landfall_demand(t_L, in_sample_paths, network_processor)
-
-                # # Create folder for post-landfall demand
-                # os.makedirs("RH demand check/post_landfall", exist_ok=True)
-
-                # # File path
-                # post_file_path = f"RH demand check/post_landfall/RH_postlandfall_t{t_bar}_s{s_t[0]:.2f}_{s_t[1]}.xlsx"
-
-                # # Save post-landfall demand to Excel
-                # with pd.ExcelWriter(post_file_path) as writer:
-                #     for s in range(self.num_sce):
-                #         records = []
-                #         for t in network_processor.T_Aft:
-                #             for i in network_processor.V3:
-                #                 val = demand_processor.d_its.get((i, t, s), 0.0)
-                #                 records.append({
-                #                     "Time": t,
-                #                     "PoD": i,
-                #                     "Demand": val
-                #                 })
-
-                #         df_post = pd.DataFrame(records)
-                #         df_post.to_excel(writer, sheet_name=f"Scenario_{s}", index=False)
-
-                # print(f"✅ Post-landfall demand saved for t_bar={t_bar}, s_t={s_t} → {post_file_path}")
-
                     
                 # Build the model for current roll
                 model, I, U, S, f = self.RH_model_creator(t_bar, sol)
