@@ -41,7 +41,7 @@ from output import save_full_oos_demand
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
-    parser.add_argument("-iv", "--instance_version", type=str, choices=["smallsize", "mediumsize", "largesize", "original"], help="Instance version: 0. original, 1. smallsize, 2. mediumsize, 3. largesize")
+    parser.add_argument("-iv", "--instance_version", type=str, choices=["original"])
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
