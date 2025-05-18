@@ -1,4 +1,4 @@
-# Multi-Period Disaster Logistics Planning
+# A Two-Stage Stochastic Programming for Disaster Logistics Planning
 
 This project implements a A Stochastic Service Network Design Model for Disaster Logistics Planning. The model integrates:
 
