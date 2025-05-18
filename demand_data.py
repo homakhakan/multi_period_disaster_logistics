@@ -35,11 +35,6 @@ class DemandData:
                 for time_period in range(demand_array.shape[1]):  # Columns = time periods
                     self.d_its[(location_index, time_period, s)] = demand_array[location_index, time_period]
 
-            # Store full demand data
-            # for loc in range(demand_array.shape[0]):
-            #     for t in range(demand_array.shape[1]):
-            #         self.full_demand_data[(loc, t, s)] = demand_array[loc, t]
-
     def load_oos_inputs(self, population_file, distance_file, network_processor):
         """
         Loads PoD population and inverse-distance weights from PoDs to shelters.
@@ -258,121 +253,6 @@ class DemandData:
         print(f"✔ Saved scaled demand CSVs to: {os.path.abspath(output_dir)}")
 
         return in_sample_data  # needed for next steps
-    
-    def generate_oos_shelter_demand(self, path, network_processor):
-        """
-        Generates shelter demand for a single out-of-sample (OOS) scenario.
-        Returns:
-            dict: Shelter demand dictionary {(i, t): value} for i ∈ V1, t ∈ T_Bef.
-        """
-        from demand_generation import demand_deterministic_landfall, data
-
-        if self.population is None or self.weights is None:
-            raise ValueError("Population and weights must be loaded first using load_oos_inputs()")
-
-        oos_demand = {}
-
-        for t in network_processor.T_Bef:
-            track_err, hurr_cat = data.test_samples_from_tree[path][t]
-            demand_vector = demand_deterministic_landfall(data, track_err, int(hurr_cat), t)
-            scaled_vector = demand_vector * self.population
-
-            demand_df = pd.DataFrame({t: scaled_vector})
-            shelter_demands = self.weights.multiply(demand_df[t], axis=0).sum(axis=0).values  # length 21
-
-            for shelter_idx, i in enumerate(network_processor.V1):
-                oos_demand[(i, t)] = shelter_demands[shelter_idx]
-
-        return oos_demand
-
-    def generate_oos_pod_demand(self, hurr_cat, network_processor):
-        """
-        Generates post-landfall PoD demand for a single OOS scenario using
-        the hurricane category at landfall and distributes it over T_Aft.
-
-        Returns:
-            dict: PoD demand dictionary {(i, t): value} for i ∈ V3, t ∈ T_Aft
-        """
-        # Load static PoD data if not already loaded
-        if not hasattr(self, "pod_info_df"):
-            self.pod_info_df = pd.read_excel("PoD location information.xlsx", sheet_name="Sheet1")
-
-        # Handle Category 0 → assign zero demand
-        if int(hurr_cat) == 0 or pd.isna(hurr_cat):
-            print(f"[Info] Category 0 detected at landfall. Assigning zero PoD demand.")
-            return {(i, t): 0.0 for i in network_processor.V3 for t in network_processor.T_Aft}
-
-        # Step 1: Convert category to string label
-        cat_label = f"Category {int(hurr_cat)}"
-
-        # Step 2: Column mapping for demand calculation
-        column_map = {
-            "Category 1": "I*p_c (cat 1)",
-            "Category 2": "I*p_c (cat 2)",
-            "Category 3": "I*p_c (cat 3)",
-            "Category 4": "I*p_c (cat 4)",
-            "Category 5": "I*p_c (cat 5)"
-        }
-
-        demand_col = column_map.get(cat_label, None)
-        if demand_col is None:
-            raise ValueError(f"Invalid hurricane category: {hurr_cat}")
-
-        evac_col = "% 1- (Likely to evacuate)"
-
-        # Step 3: Calculate total PoD demand for each location
-        total_demand = self.pod_info_df[demand_col] * self.pod_info_df[evac_col]
-        total_demand = total_demand.to_numpy()  # shape: (7,)
-
-        # Step 4: Create normal-distribution-based weights over T_Aft
-        mean = np.mean(network_processor.T_Aft)
-        std = self.std_pod  # from YAML or class-level default
-
-        weights = np.array([
-            np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
-        ])
-        weights /= weights.sum()  # Normalize to sum to 1
-
-        # Step 5: Build final {(i, t)} dictionary
-        pod_demand = {}
-        for idx, i in enumerate(network_processor.V3):
-            for w_idx, t in enumerate(network_processor.T_Aft):
-                pod_demand[(i, t)] = total_demand[idx] * weights[w_idx]
-
-        return pod_demand
-    
-    def generate_full_oos_demand(self, path, network_processor):
-        """
-        Combines OOS shelter and PoD demand into one full demand dictionary.
-
-        Returns:
-            dict: Full OOS demand dictionary {(i, t): demand}
-        """
-        from demand_generation import data  # Access test_samples_from_tree
-
-        # Generate shelter demand (for i in V1, t in T_Bef)
-        shelter_demand = self.generate_oos_shelter_demand(path, network_processor)
-
-        # Extract hurricane category at t_L for the same path
-        _, hurr_cat = data.test_samples_from_tree[path][network_processor.t_L]
-
-        # Generate PoD demand (for i in V3, t in T_Aft)
-        pod_demand = self.generate_oos_pod_demand(hurr_cat, network_processor)
-
-        # Combine and initialize full demand dictionary
-        full_demand = {}
-
-        for i in range(network_processor.V):
-            for t in range(network_processor.T):
-                # Prioritize actual demands
-                if (i, t) in shelter_demand:
-                    full_demand[(i, t)] = shelter_demand[(i, t)]
-                elif (i, t) in pod_demand:
-                    full_demand[(i, t)] = pod_demand[(i, t)]
-                else:
-                    full_demand[(i, t)] = 0.0  # Zero for all others
-
-        return full_demand
 
     def allocate_demand(self, demand_files, output_file, network_processor, num_scenarios=None):
 

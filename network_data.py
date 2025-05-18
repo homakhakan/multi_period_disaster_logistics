@@ -140,25 +140,6 @@ class NetworkData:
         # seconds_per_hour = 3600
         # self.t_ijt = []
 
-        # for i in range(len(self.df_V)):
-        #     row = []
-        #     for j in range(len(self.df_V)):
-        #         base_time = self.timeMatrix[i][j] / seconds_per_hour / self.tperiod
-        #         if i == j:
-        #             travel_time = 0  # No self-loop
-        #         else:
-        #             # Slight randomization: ceil to integer, then add extra delay for some
-        #             travel_time = math.ceil(base_time)
-        #             if travel_time == 1 and np.random.rand() < 0.3:  # 30% chance to add delay
-        #                 travel_time += np.random.randint(1, 3)  # Add 1 or 2 extra time periods
-        #         row.append(travel_time)
-        #     self.t_ijt.append(row)
-
-        # # Save to CSV to inspect
-        # df_t_ijt = pd.DataFrame(self.t_ijt)
-        # df_t_ijt.to_csv("t_ijt_matrix_randomized.csv", index=False)
-        # print("\nt_ijt matrix with variation saved to t_ijt_matrix_randomized.csv")
-
         # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
         self.t_ijt = pd.read_csv("Data/t_ijt_matrix_randomized.csv").values.tolist()
 
