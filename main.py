@@ -64,7 +64,7 @@ if __name__ == "__main__":
     # ----------- Simulated In-Sample Demand Setup for static 2SSP------------
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     print("\nGenerating in-sample demand...")
-    demand_processor.load_oos_inputs(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+    demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
     demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, output_dir="Generated data/csv_by_location")
     demand_processor.allocate_demand(demand_files = [f"Generated data/csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Generated data/Shelter_Demand.xlsx", network_processor=network_processor)
     demand_processor.calculate_landfall_demand(wind_speed_file="Generated data/LandfallStates.xlsx", pod_info_file="Data/PoD location information.xlsx", output_file="Generated data/POD_Demand_total.xlsx")
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         total_costs = []
 
         # Load inputs once
-        demand_processor.load_oos_inputs(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+        demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
 
         sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/Data/real_sample_paths_new.csv"
         
@@ -134,19 +134,24 @@ if __name__ == "__main__":
         for k in range(args.num_oos):
             print(f"\n🔁 OOS Scenario {k}")
             sample_path_row = OS_paths[k]
+            s_t0 = eval(sample_path_row[0])  # current hurricane state at t = 0
 
             # Step 1: Clear previous demand
             demand_processor.d_its = {}
-            
-            # Step 2: Generate full deterministic demand
-            demand_processor.pre_landfall_demand_S_2SSP(sample_path_row, network_processor, demand_processor, t_L)
-            demand_processor.post_landfall_demand_S_2SSP(sample_path_row, network_processor, demand_processor, t_L)
 
-            # Fill in missing keys
-            for i in range(network_processor.V):
-                for t in range(network_processor.T):
-                    if (i, t, 0) not in demand_processor.d_its:
-                        demand_processor.d_its[(i, t, 0)] = 0.0
+            # Generate pre-landfall demand at t=0
+            demand_processor.generate_current_demand(t_bar=0, s_t=s_t0, network_processor=network_processor, data=data, solution_method=args.solution_method)
+
+            # Clean the realized sample path row
+            realized_path = [eval(state.replace('\x00', '')) for state in sample_path_row]
+            # Make it shape (1, T) to act like [s, t]
+            in_sample_paths = np.array([realized_path])  # Only s = 0
+
+            # Generate pre-landfall demand from t=1 to t_L
+            demand_processor.generate_future_demand(t_bar=0, s_t=s_t0, t_L=t_L, network_processor=network_processor, in_sample_paths=in_sample_paths, solution_method=args.solution_method)
+            
+            # Generate post-landfall demand
+            demand_processor.generate_post_landfall_demand(t_L=t_L, in_sample_paths=in_sample_paths, network_processor=network_processor, solution_method=args.solution_method)
 
             # Step 3: Solve deterministic second-stage model with fixed I
             cost = ext_model_instance.OOS_2SSP(fixed_I_irt)
