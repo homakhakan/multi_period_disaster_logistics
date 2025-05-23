@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     thetaLB = float(params["THETA_LB"])
     eps = float(params["EPS"])
-
+    #test
     network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters()
