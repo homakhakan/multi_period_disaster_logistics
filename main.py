@@ -34,7 +34,6 @@ os.chdir(os.path.dirname(__file__))
 from demand_data import DemandData
 from network_data import NetworkData
 from model import TwoStageSPModel
-from method import benders
 import output
 from output import save_full_oos_demand
 
@@ -47,6 +46,7 @@ if __name__ == "__main__":
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH")
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
     with open("fixed_params.yaml", "r") as f:
@@ -65,13 +65,24 @@ if __name__ == "__main__":
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     print("\nGenerating in-sample demand...")
     demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
-    demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, output_dir="Generated data/csv_by_location")
-    demand_processor.allocate_demand(demand_files = [f"Generated data/csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Generated data/Shelter_Demand.xlsx", network_processor=network_processor)
-    demand_processor.calculate_landfall_demand(wind_speed_file="Generated data/LandfallStates.xlsx", pod_info_file="Data/PoD location information.xlsx", output_file="Generated data/POD_Demand_total.xlsx")
-    demand_processor.distribute_demand_by_time(total_demand_file="Generated data/PoD_Demand_total.xlsx", network_processor=network_processor, output_file="Generated data/POD_Demand.xlsx")
-    demand_processor.combine_demand_data(shelter_file="Generated data/Shelter_Demand.xlsx",pod_file="Generated data/POD_Demand.xlsx", network_processor=network_processor, output_file="Generated data/demand_data_dynamic.xlsx")
-    demand_processor.generate_scenario_data()
-    demand_processor.load_demand_data()
+    
+    if args.debug:
+        demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, output_dir="Generated data/csv_by_location", debug_mode=True)
+        demand_processor.allocate_demand(demand_files = [f"Generated data/csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Generated data/Shelter_Demand.xlsx", network_processor=network_processor, debug_mode=True)
+        demand_processor.calculate_landfall_demand(wind_speed_file="Generated data/LandfallStates.xlsx", pod_info_file="Data/PoD location information.xlsx", output_file="Generated data/POD_Demand_total.xlsx", debug_mode=True)
+        demand_processor.distribute_demand_by_time(total_demand_file="Generated data/PoD_Demand_total.xlsx", network_processor=network_processor, output_file="Generated data/POD_Demand.xlsx", debug_mode=True)
+        demand_processor.combine_demand_data(shelter_file="Generated data/Shelter_Demand.xlsx",pod_file="Generated data/POD_Demand.xlsx", network_processor=network_processor, output_file="Generated data/demand_data_dynamic.xlsx", debug_mode=True)
+        demand_processor.generate_scenario_data()
+        demand_processor.load_demand_data()
+
+    else: 
+        in_sample_data, scaled_demands = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, debug_mode=args.debug)
+        df_landfall_states = demand_processor.save_landfall_states(in_sample_data, network_processor, debug_mode=args.debug)
+        shelter_demand_dict = demand_processor.allocate_demand(demand_data=scaled_demands, network_processor=network_processor, debug_mode=args.debug)
+        pod_total_demand_dict = demand_processor.calculate_landfall_demand(landfall_df=df_landfall_states, pod_info_file="Data/PoD location information.xlsx", debug_mode=args.debug)
+        pod_time_distributed_dict = demand_processor.distribute_demand_by_time(total_demand_dict=pod_total_demand_dict, network_processor=network_processor, debug_mode=args.debug)
+        combined_demand_dict = demand_processor.combine_demand_data(shelter_data_dict=shelter_demand_dict, pod_data_dict=pod_time_distributed_dict, network_processor=network_processor, debug_mode=args.debug)
+        demand_processor.populate_demand(combined_demand_dict)
 
     print("\nReading data...")  
     # Print the output
@@ -171,7 +182,9 @@ if __name__ == "__main__":
         benders_model_instance.optimality_sub()
         benders_model_instance.feasibility_sub()
         start_time_benders = time.time()
-        LB, UB, num_iter, num_Fcuts, num_Ocuts = benders(benders_model_instance, eps, thetaLB, args.time_limit)
+
+        LB, UB, num_iter, num_Fcuts, num_Ocuts = benders_model_instance.benders(eps, thetaLB, args.time_limit)
+
         end_time_benders = time.time()
         total_time_benders = end_time_benders - start_time_benders
 

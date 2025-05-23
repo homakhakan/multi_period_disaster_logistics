@@ -201,90 +201,10 @@ class DemandData:
                                 if (i, t) not in self.d_its:
                                     self.d_its[(i, t)] = 0.0
     
-    def generate_in_sample_demand(self, num_sce, network_processor, output_dir="csv_by_location"):
+    def save_landfall_states(self, in_sample_data, network_processor, output_file="Generated data/LandfallStates.xlsx", debug_mode=False):
         """
-        Generates in-sample demand based on hurricane track and category,
-        scales by population, saves CSV files per location, and landfall states.
-
-        Returns:
-            in_sample_data: Array of in-sample hurricane states
-        """
-        from demand_generation import in_sample, demand_deterministic_landfall, data  # Local import
-
-        if self.population is None:
-            raise ValueError("Population data not loaded. Call load_input_files() first.")
-
-        initial_state = data.state_space[0][0]
-        S = num_sce
-
-        in_sample_data = in_sample(0, initial_state, S)
-
-        # Save landfall states to Excel
-        self.save_landfall_states(in_sample_data, network_processor)
-
-        all_demands = []
-        for s in range(S):
-            sample_demands = []
-            for t in network_processor.T_Bef:
-                track_err, intensity = in_sample_data[s, t]
-                demand = demand_deterministic_landfall(data, track_err, intensity, t)
-                sample_demands.append(demand)
-            all_demands.append(sample_demands)
-
-        # Scale by population
-        scaled_demands = np.array(all_demands) * self.population  # (S, T, I)
-
-        # Save location-wise CSVs
-        os.makedirs(output_dir, exist_ok=True)
-        S, T, I = scaled_demands.shape
-
-        for i in range(I):
-            data_matrix = [np.round(scaled_demands[s, :, i], 3) for s in range(S)]
-            df = pd.DataFrame(data_matrix)
-            df.to_csv(os.path.join(output_dir, f"location_{i}.csv"), index=False, header=False)
-
-        print(f"✔ Saved scaled demand CSVs to: {os.path.abspath(output_dir)}")
-
-        return in_sample_data  # needed for next steps
-
-    def allocate_demand(self, demand_files, output_file, network_processor, num_scenarios=None):
-
-        # Allocates demand from PoDs to shelters based on inverse distance.
-
-        if num_scenarios is None:
-            num_scenarios = self.num_sce
-
-        if self.weights is None:
-            raise ValueError("Inverse distance weights not loaded. Call load_inout_files() first.")
-        
-        weights = self.weights
-
-        # Load demand data (7 files, each with 1048 scenarios & 6 time periods)
-        demand_scenarios = [pd.read_csv(file, header=None) for file in demand_files]
-
-        # Allocate demand for the specified number of scenarios
-        allocated_demand = {}
-        for scenario_idx in range(num_scenarios):
-            # Extract demand for this scenario across all 7 PODs (6 time periods each)
-            demand_df = pd.DataFrame({t: [demand_scenarios[pod].iloc[scenario_idx, t] for pod in range(network_processor.num_pods)] for t in range(len(network_processor.T_Bef))})
-
-            # Allocate demand based on distance weights
-            allocation_matrix = {t: weights.multiply(demand_df[t], axis=0).sum(axis=0) for t in range(len(network_processor.T_Bef))}
-
-            # Convert to DataFrame where rows are shelters, columns are time periods
-            allocated_demand[f"Scenario_{scenario_idx}"] = pd.DataFrame(allocation_matrix, index=range(network_processor.num_shelters))
-
-        # Save the results
-        with pd.ExcelWriter(output_file) as writer:
-            for scenario, df in allocated_demand.items():
-                df.to_excel(writer, sheet_name=scenario)
-
-        print(f"✅ Demand allocation completed. File saved: {output_file}")
-
-    def save_landfall_states(self, in_sample_data, network_processor, output_file="Generated data/LandfallStates.xlsx"):
-        """
-        Extract hurricane track and category at time of landfall and save to Excel.
-
+        Extract hurricane track and category at time of landfall.
+        If debug_mode=True, save to Excel. Otherwise, return the DataFrame.
         """
         t_L = network_processor.t_L
         S = in_sample_data.shape[0]
@@ -298,18 +218,151 @@ class DemandData:
         df_landfall["hurr_cat"] = df_landfall["hurr_cat"].apply(
             lambda x: f"Category {int(x)}" if pd.notna(x) else "N/A")
 
-        df_landfall.to_excel(output_file, index=False)
-        print(f"✔ Saved PoD landfall states to: {output_file}")
+        if debug_mode:
+            df_landfall.to_excel(output_file, index=False)
+            print(f"✅ Saved PoD landfall states to: {output_file}")
+        else:
+            return df_landfall
 
-    def calculate_landfall_demand(self, wind_speed_file, pod_info_file, output_file):
-        # Load the data
-        wind_speed_df = pd.read_excel(wind_speed_file, header=0)
+    def generate_in_sample_demand(self, num_sce, network_processor, output_dir="csv_by_location", debug_mode=False):
+        """
+        Generates in-sample demand based on hurricane track and category,
+        scales by population. In debug_mode, saves files for inspection.
+
+        Returns:
+            Tuple: (in_sample_data, scaled_demands) if debug_mode=False,
+                in_sample_data only if debug_mode=True
+        """
+        from demand_generation import in_sample, demand_deterministic_landfall, data
+
+        if self.population is None:
+            raise ValueError("Population data not loaded. Call load_input_files() first.")
+
+        initial_state = data.state_space[0][0]
+        S = num_sce
+
+        in_sample_data = in_sample(0, initial_state, S)
+
+        # Save or return landfall states
+        self.save_landfall_states(in_sample_data, network_processor, debug_mode=debug_mode)
+
+        # Generate demand matrix
+        all_demands = []
+        for s in range(S):
+            sample_demands = []
+            for t in network_processor.T_Bef:
+                track_err, intensity = in_sample_data[s, t]
+                demand = demand_deterministic_landfall(data, track_err, intensity, t)
+                sample_demands.append(demand)
+            all_demands.append(sample_demands)
+
+        # Scale by population
+        scaled_demands = np.array(all_demands) * self.population  # Shape: (S, T, I)
+
+        if debug_mode:
+            os.makedirs(output_dir, exist_ok=True)
+            S, T, I = scaled_demands.shape
+
+            for i in range(I):
+                data_matrix = [np.round(scaled_demands[s, :, i], 3) for s in range(S)]
+                df = pd.DataFrame(data_matrix)
+                df.to_csv(os.path.join(output_dir, f"location_{i}.csv"), index=False, header=False)
+
+            print(f"✅ Saved scaled demand CSVs to: {os.path.abspath(output_dir)}")
+            return in_sample_data
+
+        else:
+            return in_sample_data, scaled_demands
+
+    def allocate_demand(self, demand_data=None, demand_files=None, output_file=None, network_processor=None, num_scenarios=None, debug_mode=False):
+        """
+        Allocates demand from PoDs to shelters based on inverse distance weights.
+        When debug_mode is True, saves Excel output; otherwise returns the allocation in memory.
+
+        Returns:
+            If debug_mode is False: dict of {scenario_name: DataFrame}
+        """
+        if num_scenarios is None:
+            num_scenarios = self.num_sce
+
+        if self.weights is None:
+            raise ValueError("Inverse distance weights not loaded. Call load_input_files() first.")
+
+        weights = self.weights
+
+        allocated_demand = {}
+
+        if debug_mode:
+            if demand_files is None:
+                raise ValueError("In debug mode, demand_files must be provided.")
+            demand_scenarios = [pd.read_csv(file, header=None) for file in demand_files]
+
+            for scenario_idx in range(num_scenarios):
+                demand_df = pd.DataFrame({
+                    t: [demand_scenarios[pod].iloc[scenario_idx, t] for pod in range(network_processor.num_pods)]
+                    for t in range(len(network_processor.T_Bef))
+                })
+                allocation_matrix = {
+                    t: weights.multiply(demand_df[t], axis=0).sum(axis=0) for t in range(len(network_processor.T_Bef))
+                }
+                df = pd.DataFrame(allocation_matrix, index=range(network_processor.num_shelters))
+                expected_shape = (network_processor.num_shelters, len(network_processor.T_Bef))
+                if df.shape != expected_shape:
+                    print(f"⚠️ Scenario {scenario_idx} (debug): Shape mismatch {df.shape}, expected {expected_shape}")
+                    print(df.head())
+
+                allocated_demand[f"Scenario_{scenario_idx}"] = df
+
+            if output_file is None:
+                raise ValueError("output_file must be specified when debug_mode=True")
+            with pd.ExcelWriter(output_file) as writer:
+                for scenario, df in allocated_demand.items():
+                    df.to_excel(writer, sheet_name=scenario)
+            print(f"✅ Demand allocation completed. File saved: {output_file}")
+
+        else:
+            if demand_data is None:
+                raise ValueError("In non-debug mode, demand_data must be provided.")
+
+            S, T, I = demand_data.shape
+            for s in range(S):
+                scenario_demand = demand_data[s]  # shape (T, I)
+
+                demand_df = pd.DataFrame({
+                    t: [scenario_demand[t, pod] for pod in range(network_processor.num_pods)]
+                    for t in range(T)
+                })
+
+                allocation_matrix = {
+                    t: weights.multiply(demand_df[t], axis=0).sum(axis=0) for t in range(T)
+                }
+                df = pd.DataFrame(allocation_matrix, index=range(network_processor.num_shelters))
+                expected_shape = (network_processor.num_shelters, T)
+                if df.shape != expected_shape:
+                    print(f"⚠️ Scenario {s}: Shape mismatch {df.shape}, expected {expected_shape}")
+                    print(df.head())
+
+                allocated_demand[f"Scenario_{s}"] = df
+
+            print("✅ Demand allocation completed in memory.")
+            return allocated_demand
+
+    def calculate_landfall_demand(self, wind_speed_file=None, landfall_df=None, pod_info_file=None, output_file=None, debug_mode=False):
+        """
+        Calculate total PoD demand after landfall using hurricane categories.
+        - If debug_mode is True, saves to Excel (as before).
+        - If debug_mode is False, returns a dict of DataFrames in memory.
+        """
+        if debug_mode:
+            wind_speed_df = pd.read_excel(wind_speed_file, header=0)
+        else:
+            if landfall_df is None:
+                raise ValueError("landfall_df must be provided when debug_mode=False")
+            wind_speed_df = landfall_df
+
         pod_info_df = pd.read_excel(pod_info_file, sheet_name='Sheet1')
-
-        # Read hurricane categories from column 'hurr_cat'
         categories = wind_speed_df['hurr_cat'].fillna("N/A")
 
-        # Define columns corresponding to each category
         category_columns = {
             "Category 1": "I*p_c (cat 1)",
             "Category 2": "I*p_c (cat 2)",
@@ -317,122 +370,185 @@ class DemandData:
             "Category 4": "I*p_c (cat 4)",
             "Category 5": "I*p_c (cat 5)"
         }
-
-        # Get the column for '% 1- (Likely to evacuate)'
         evac_column = '% 1- (Likely to evacuate)'
 
-        # Create an Excel writer to save the results
-        with pd.ExcelWriter(output_file) as writer:
-            for scenario_idx in range(len(categories)):
-                # Get the category for this scenario
-                category = categories.iloc[scenario_idx]
+        demand_results = {}
 
-                # Check if the category is valid
-                demand_column = category_columns.get(category, None)
+        for scenario_idx in range(len(categories)):
+            category = categories.iloc[scenario_idx]
+            demand_column = category_columns.get(category, None)
 
-                if demand_column is not None:
-                    # Extract the necessary data for calculation
-                    pod_demand_values = pod_info_df[demand_column]
-                    evacuation_factors = pod_info_df[evac_column]
+            if demand_column is not None:
+                pod_demand_values = pod_info_df[demand_column]
+                evacuation_factors = pod_info_df[evac_column]
+                demand_values = pod_demand_values * evacuation_factors
+            else:
+                demand_values = pd.Series(0, index=pod_info_df.index)
 
-                    # Calculate demand: (I*p_c) * (% 1- Likely to evacuate)
-                    demand_values = pod_demand_values * evacuation_factors
+            demand_values = demand_values.astype(float)
 
-                else:
-                    # If the category is N/A, set demand to 0
-                    demand_values = pd.Series(0, index=pod_info_df.index)
+            scenario_data = pd.DataFrame({
+                'County': pod_info_df['County'],
+                'total demand': demand_values
+            })
 
-                # Ensure numeric data type
-                demand_values = demand_values.astype(float)
+            sheet_name = f'Scenario_{scenario_idx}'
+            demand_results[sheet_name] = scenario_data
 
-                # Prepare the output DataFrame
-                scenario_data = pd.DataFrame({
-                    'County': pod_info_df['County'],
-                    'total demand': demand_values
-                })
+        if debug_mode:
+            if output_file is None:
+                raise ValueError("output_file must be specified when debug_mode=True")
 
-                # Write to Excel sheet for this scenario
-                sheet_name = f'Scenario_{scenario_idx}'
-                scenario_data.to_excel(writer, sheet_name=sheet_name, index=False)
+            with pd.ExcelWriter(output_file) as writer:
+                for sheet_name, df in demand_results.items():
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        print(f"✅ Corrected output file generated: {output_file}")
+            print(f"✅ Corrected output file generated: {output_file}")
+        else:
+            print("✅ Landfall demand generated in memory.")
+            return demand_results
 
-    def distribute_demand_by_time(self, total_demand_file, network_processor, output_file):
-        # Load the total demand file
-        total_demand_data = pd.ExcelFile(total_demand_file)
+    def distribute_demand_by_time(self, total_demand_file=None, total_demand_dict=None, network_processor=None, output_file=None, debug_mode=False):
+        """
+        Distribute total post-landfall demand across time periods using a normal distribution.
 
-        # Define time periods and normal distribution parameters
-        time_periods = time_periods = network_processor.T_Aft
-        mean = np.mean(network_processor.T_Aft)
+        If debug_mode is True, saves to Excel (as before).
+        If debug_mode is False, returns a dictionary of DataFrames.
+
+        Returns:
+            dict (only if debug_mode is False): {sheet_name: DataFrame}
+        """
+        if debug_mode:
+            if total_demand_file is None:
+                raise ValueError("total_demand_file must be provided when debug_mode=True")
+            total_demand_data = pd.ExcelFile(total_demand_file)
+            sheet_names = total_demand_data.sheet_names
+        else:
+            if total_demand_dict is None:
+                raise ValueError("total_demand_dict must be provided when debug_mode=False")
+            total_demand_data = total_demand_dict
+            sheet_names = total_demand_data.keys()
+
+        time_periods = network_processor.T_Aft
+        mean = np.mean(time_periods)
         std = self.std_pod
 
-        # Calculate normalized weights using a normal distribution
         distribution_values = [np.exp(-((t - mean) ** 2) / (2 * (std ** 2))) for t in time_periods]
-        weights = np.array(distribution_values) / sum(distribution_values)  # Normalize weights to sum to 1
+        weights = np.array(distribution_values) / sum(distribution_values)
 
-        # Create an Excel writer to save the results
-        with pd.ExcelWriter(output_file) as writer:
-            for sheet_name in total_demand_data.sheet_names:
-                # Read the data for the current scenario
+        all_distributed = {}
+
+        for sheet_name in sheet_names:
+            if debug_mode:
                 scenario_data = pd.read_excel(total_demand_data, sheet_name=sheet_name)
+            else:
+                scenario_data = total_demand_data[sheet_name]
 
-                # Apply the distribution weights to the total demand for each county
-                distributed_demands = {
-                    f'Time_{t}': scenario_data['total demand'] * weight for t, weight in zip(time_periods, weights)
-                }
+            distributed_demands = {
+                f'Time_{t}': scenario_data['total demand'] * weight
+                for t, weight in zip(time_periods, weights)
+            }
 
-                # Prepare the output DataFrame
-                output_data = scenario_data[['County']].copy()
-                for period, demand in distributed_demands.items():
-                    output_data[period] = demand
+            output_data = scenario_data[['County']].copy()
+            for period, demand in distributed_demands.items():
+                output_data[period] = demand
 
-                # Write the output data to the Excel sheet
-                output_data.to_excel(writer, sheet_name=sheet_name, index=False)
+            all_distributed[sheet_name] = output_data
 
-        print(f"✅ Distributed demand file generated: {output_file}")
-    
-    def combine_demand_data(self, shelter_file, pod_file, network_processor, output_file, num_scenarios=None):
+        if debug_mode:
+            if output_file is None:
+                raise ValueError("output_file must be specified when debug_mode=True")
+
+            with pd.ExcelWriter(output_file) as writer:
+                for sheet_name, df in all_distributed.items():
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            print(f"✅ Distributed demand file generated: {output_file}")
+        else:
+            print("✅ Distributed demand computed in memory.")
+            return all_distributed
+
+    def combine_demand_data(self, shelter_file=None, pod_file=None, shelter_data_dict=None, pod_data_dict=None, network_processor=None, output_file=None, num_scenarios=None, debug_mode=False):
         """
-        Combine shelter and pod demand into one Excel file with scenario sheets.
+        Combine shelter and pod demand into one Excel file or return combined data per scenario.
+
+        Args:
+            debug_mode (bool): If True, writes to Excel. If False, returns dict of combined DataFrames.
+
+        Returns:
+            dict (if debug_mode is False): {scenario_name: combined DataFrame}
         """
         if num_scenarios is None:
             num_scenarios = self.num_sce
 
-        # Read data from both files (assuming data is in each scenario sheet)
-        shelter_data = pd.read_excel(shelter_file, sheet_name=None)
-        pod_data = pd.read_excel(pod_file, sheet_name=None)
+        if debug_mode:
+            # Read Excel files
+            shelter_data = pd.read_excel(shelter_file, sheet_name=None)
+            pod_data = pd.read_excel(pod_file, sheet_name=None)
+        else:
+            # Use provided dictionaries
+            if shelter_data_dict is None or pod_data_dict is None:
+                raise ValueError("Both shelter_data_dict and pod_data_dict must be provided when debug_mode=False")
+            shelter_data = shelter_data_dict
+            pod_data = pod_data_dict
 
-        # Create an output Excel writer using openpyxl
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            for scenario_num in range(num_scenarios):
-                scenario_sheet = f'Scenario_{scenario_num}'
+        combined_results = {}
 
-                # Get data for the current scenario
-                shelter_scenario = shelter_data.get(scenario_sheet, pd.DataFrame())
-                pod_scenario = pod_data.get(scenario_sheet, pd.DataFrame())
+        for scenario_num in range(num_scenarios):
+            scenario_sheet = f'Scenario_{scenario_num}'
 
-                # Initialize combined data structure
-                combined_data = pd.DataFrame(0.0, index=range(network_processor.num_locations), columns=range(network_processor.T))  # Initialize with float values
+            shelter_scenario = shelter_data.get(scenario_sheet, pd.DataFrame())
+            pod_scenario = pod_data.get(scenario_sheet, pd.DataFrame())
 
-                # Assign shelter demand
-                if not shelter_scenario.empty:
-                    shelter_values = shelter_scenario.iloc[:, 1 : 1 + len(network_processor.T_Bef)].values
-                    for row_idx, loc_id in enumerate(network_processor.V1):
-                        combined_data.iloc[loc_id, 0 : len(network_processor.T_Bef)] = shelter_values[row_idx]
+            combined_data = pd.DataFrame(0.0, index=range(network_processor.num_locations), columns=range(network_processor.T))
 
-                # Assign PoD demand
-                if not pod_scenario.empty:
-                    pod_values = pod_scenario.iloc[:, 1 : 1 + len(network_processor.T_Aft)].values
-                    for row_idx, loc_id in enumerate(network_processor.V3):
-                        combined_data.iloc[loc_id, len(network_processor.T_Bef) : ] = pod_values[row_idx]
+            if not shelter_scenario.empty:
+                shelter_values = shelter_scenario.iloc[:, :len(network_processor.T_Bef)].values
+                for row_idx, loc_id in enumerate(network_processor.V1):
+                    if shelter_values.shape[1] != len(network_processor.T_Bef):
+                        raise ValueError(
+                            f"Scenario {scenario_sheet}: Expected {len(network_processor.T_Bef)} shelter columns, got {shelter_values.shape[1]}"
+                        )
+                    combined_data.iloc[loc_id, 0 : len(network_processor.T_Bef)] = shelter_values[row_idx]
 
-                # Add index column
-                combined_data.insert(0, 'Index', range(1, network_processor.num_locations + 1))
+            if not pod_scenario.empty:
+                pod_values = pod_scenario.iloc[:, 1 : 1 + len(network_processor.T_Aft)].values
+                for row_idx, loc_id in enumerate(network_processor.V3):
+                    if pod_values.shape[1] != len(network_processor.T_Aft):
+                        raise ValueError(
+                            f"Scenario {scenario_sheet}: Expected {len(network_processor.T_Aft)} PoD columns, got {pod_values.shape[1]}"
+                        )
+                    combined_data.iloc[loc_id, len(network_processor.T_Bef) : ] = pod_values[row_idx]
 
-                # Write combined data to a new sheet
-                combined_data.to_excel(writer, sheet_name=scenario_sheet, index=False)
+            combined_data.insert(0, 'Index', range(1, network_processor.num_locations + 1))
+            combined_results[scenario_sheet] = combined_data
 
-        print(f"✅Combined data saved to {output_file}")
+        if debug_mode:
+            if output_file is None:
+                raise ValueError("output_file must be provided in debug mode.")
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                for sheet_name, df in combined_results.items():
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+            print(f"✅ Combined data saved to {output_file}")
+        else:
+            print("✅ Combined demand data prepared in memory.")
+            return combined_results
+
+    def populate_demand(self, combined_demand_dict):
+        """
+        Populate self.d_its using combined demand data dictionary and update scenario list and probabilities.
+        """
+        for scenario_name, df in combined_demand_dict.items():
+            scenario_idx = int(scenario_name.split("_")[-1])  # Extract s from "Scenario_0"
+            for i in range(df.shape[0]):
+                for t in range(1, df.shape[1]):  # Skip 'Index' column
+                    loc_id = i
+                    time_step = t - 1
+                    demand_value = df.iloc[i, t]
+                    self.d_its[(loc_id, time_step, scenario_idx)] = demand_value
+
+        self.sce = list(range(self.num_sce))
+        self.P = [1 / self.num_sce] * self.num_sce
 
     def compute_expected_demand(self):
 
