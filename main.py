@@ -133,7 +133,7 @@ if __name__ == "__main__":
         # Load inputs once
         demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
 
-        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/Data/real_sample_paths_new.csv"
+        sample_paths_file = "Data/real_sample_paths_new.csv"
         
         # Load OOS sample paths (CSV)
         OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths_new.csv"
@@ -224,7 +224,7 @@ if __name__ == "__main__":
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "C:/Users/hkhakan/OneDrive - Clemson University/PhD/Research/2SSP/2SSP-Benders/2SSP-new/Data/real_sample_paths_new.csv"  # <-- Update with actual path
+        sample_paths_file = "Data/real_sample_paths_new.csv"
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation(
