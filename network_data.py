@@ -143,6 +143,9 @@ class NetworkData:
         # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
         self.t_ijt = pd.read_csv("Data/t_ijt_matrix_randomized.csv").values.tolist()
 
+        #Starting number of trucks at location i (time period 0)
+        self.C_i0 = self.df_V["TruckStart"].tolist()
+        
         # Truck delay per location
         self.h_i = self.df_V['TruckDelay'].tolist()
 
