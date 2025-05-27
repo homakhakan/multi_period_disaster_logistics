@@ -252,7 +252,7 @@ class TwoStageSPModel:
             m.setParam("Cuts", 2)               # Try more aggressive cutting planes
             m.setParam("Presolve", 2)           # Aggressive presolve
 
-        #m.setParam("OutputFlag", 0)
+        m.setParam("OutputFlag", 0)
         m.update()
         return m, I
 
@@ -915,12 +915,12 @@ class TwoStageSPModel:
         """
         from demand_generation import data, in_sample
 
-        nbOS = demand_processor.nbOS
-
         # Load all sample paths from CSV
         OS_paths_df = pd.read_csv(sample_paths_file)
-        OS_paths = OS_paths_df.values
-        nbOS = OS_paths.shape[0]
+
+        # Use only as many OOS paths as specified by demand_processor.nbOS
+        nbOS = demand_processor.nbOS
+        OS_paths = OS_paths_df.values[:nbOS]
 
         print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths...")
 
