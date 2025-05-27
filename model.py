@@ -21,7 +21,7 @@ class TwoStageSPModel:
         # Initialize fixed_flow_all for use across RH-related functions
         self.fixed_flow_all = {}
 
-    def ext_model(self, is_mvp=False):
+    def ext_model(self, is_mvp=False, model_version=1):
 
         if is_mvp:
             self.demand_processor.d_its = self.demand_processor.d_its_expected
@@ -45,6 +45,8 @@ class TwoStageSPModel:
         K_ijt = self.network_processor.K_ijt
         w_r = self.network_processor.w_r
         I_ir0 = self.network_processor.I_ir0
+        C_i0 = self.network_processor.C_i0
+        h_i = self.network_processor.h_i
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
         t_ijt = self.network_processor.t_ijt   
@@ -54,6 +56,7 @@ class TwoStageSPModel:
         m_ij = self.network_processor.m_ij
         sce = range(self.num_sce)  # Number of scenarios
 
+        # Define first-stage decision variables
         # I: Inventory of commodity r at node i at the start of time period t
         I = {}
         
@@ -61,6 +64,20 @@ class TwoStageSPModel:
             for r in range(R):
                 for t in range(T):
                     I[i, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="I_%s_%s_%s" % (i, r, t))
+
+        # Add vehicle routing variables if model version 2 is selected
+        if model_version == 2:
+            K = {}  # Number of vehicles on arc (i,j) at time t
+            for i in range(V):
+                for j in range(V):
+                    if (i, j) in A:
+                        for t in range(T):
+                            K[i, j, t] = m.addVar(vtype=GRB.INTEGER, lb=0, name="K_%s_%s_%s" % (i, j, t))
+
+            J = {}  # Number of vehicles at node i at time t
+            for i in range(V):
+                for t in range(T):
+                    J[i, t] = m.addVar(vtype=GRB.INTEGER, lb=0, name="J_%s_%s" % (i, t))
         
         # Define second-stage decision variables
         U = {}  # Demand shortage at location i at time period t in scenario s
@@ -88,30 +105,31 @@ class TwoStageSPModel:
                                 f[i, j, r, t, s] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="f_%s_%s_%s_%s_%s" % (i, j, r, t, s))
         m.update()
 
-        # Add constraints for the lower bound of inventory at warehouses (V0)
-        for i in V0:  # Loop over warehouse nodes
-            for r in range(R):  # Loop over commodities
-                for t in range(1, T):  # Loop over time periods (from t=1 to T-1)
-                    # Calculate the total arc capacity for the current time period
-                    arc_capacity = sum(K_ijt[i][j][t] for j in range(V) if (i, j) in A)
-                    # Calculate max outflow for commodity r
-                    max_outflow_r = arc_capacity  / w_r[r]
-                    # Check if the initial inventory is greater than or equal to max_outflow_r
-                    if I_ir0[i][r] >= max_outflow_r:
-                        # Add the lower bound constraint
-                        m.addConstr(I[i, r, t] >= I_ir0[i][r] - max_outflow_r, name=f"LowerBound_Warehouse_{i}_{r}_{t}")
-        
-        
-        # Add constraints for the upper bound of inventory at PoDs (V3)
-        for i in V3:  # PoDs
-            for r in range(R):  # Commodities
-                for t in T_Bef[1:]:  # Time periods before landfall, excluding t=0
-                    # Calculate the total arc capacity for the current time period
-                    arc_capacity = sum(K_ijt[j][i][t] for j in range(V) if (j, i) in A)
-                    # Calculate max inflow for commodity r
-                    max_inflow_r = arc_capacity / w_r[r]            
-                    # Add the upper bound constraint
-                    m.addConstr(I[i, r, t] <= I_ir0[i][r] + max_inflow_r, name=f"UpperBound_PoD_{i}_{r}_{t}")
+        if model_version == 1:
+            # Add constraints for the lower bound of inventory at warehouses (V0)
+            for i in V0:  # Loop over warehouse nodes
+                for r in range(R):  # Loop over commodities
+                    for t in range(1, T):  # Loop over time periods (from t=1 to T-1)
+                        # Calculate the total arc capacity for the current time period
+                        arc_capacity = sum(K_ijt[i][j][t] for j in range(V) if (i, j) in A)
+                        # Calculate max outflow for commodity r
+                        max_outflow_r = arc_capacity  / w_r[r]
+                        # Check if the initial inventory is greater than or equal to max_outflow_r
+                        if I_ir0[i][r] >= max_outflow_r:
+                            # Add the lower bound constraint
+                            m.addConstr(I[i, r, t] >= I_ir0[i][r] - max_outflow_r, name=f"LowerBound_Warehouse_{i}_{r}_{t}")
+            
+            
+            # Add constraints for the upper bound of inventory at PoDs (V3)
+            for i in V3:  # PoDs
+                for r in range(R):  # Commodities
+                    for t in T_Bef[1:]:  # Time periods before landfall, excluding t=0
+                        # Calculate the total arc capacity for the current time period
+                        arc_capacity = sum(K_ijt[j][i][t] for j in range(V) if (j, i) in A)
+                        # Calculate max inflow for commodity r
+                        max_inflow_r = arc_capacity / w_r[r]            
+                        # Add the upper bound constraint
+                        m.addConstr(I[i, r, t] <= I_ir0[i][r] + max_inflow_r, name=f"UpperBound_PoD_{i}_{r}_{t}")
         
         
         # Add constraints to ensure inventory at warehouses only decreases over time
@@ -174,20 +192,41 @@ class TwoStageSPModel:
                                 name="InventoryUpdate_%s_%s_%s_%s" % (i, r, t, s)
                             )
         
-        
         # Flow capacity constraint for all links, time periods, and scenarios
         for i in range(V):
             for j in range(V):
                 if (i, j) in A:  # Only consider valid links in A
                     for t in range(T):
                         for s in sce:
-                            # Check if the capacity for this (i, j, t) exists in K_ijt
-                            #if i in K_ijt and j in K_ijt[i] and t in K_ijt[i][j]:
+                                
+                            if model_version == 2:
                                 m.addConstr(
-                                    gp.quicksum(w_r[r] * f[i, j, r, t, s] for r in range(R)) <= K_ijt[i][j][t],
-                                    name="FlowCapacity_%s_%s_%s_%s" % (i, j, t, s)
-                                )
-        
+                                gp.quicksum(w_r[r] * f[i, j, r, t, s] for r in range(R)) <= K[i, j, t],
+                                name="FlowCapacity_%s_%s_%s_%s" % (i, j, t, s))
+                            else:
+                                m.addConstr(
+                                gp.quicksum(w_r[r] * f[i, j, r, t, s] for r in range(R)) <= K_ijt[i][j][t],
+                                name="FlowCapacity_%s_%s_%s_%s" % (i, j, t, s))
+
+        if model_version == 2:
+            # Vehicle initializtion constraint
+            for i in range(V):
+                m.addConstr(J[i, 0] == C_i0[i], name="VehicleInit_%s" % i)
+
+            
+            # Vehicle flow balance constraint
+            for i in range(V):
+                for t in range(T - 1):
+                    outgoing = gp.quicksum(K[i, j, t] for j in range(V) if (i, j) in A)
+                    incoming = gp.LinExpr()
+                    for j in range(V):
+                        if (j, i) in A:
+                            t_prime = t - t_ijt[j][i] - 1 - h_i[i]
+                            if t_prime >= 0:
+                                incoming += K[j, i, t_prime]
+                    m.addConstr(
+                        J[i, t + 1] == J[i, t] - outgoing + incoming, name="VehicleCont_%s_%s" % (i, t))
+
         m.update()
 
         objective = gp.quicksum(
@@ -206,7 +245,13 @@ class TwoStageSPModel:
         )
             
         m.setObjective(objective, GRB.MINIMIZE)
-        m.setParam("OutputFlag", 0)
+        if model_version == 2:
+            m.setParam("Heuristics", 0.5)       # Increase heuristic effort
+            m.setParam("MIPFocus", 1)           # Focus on finding feasible solutions
+            m.setParam("Cuts", 2)               # Try more aggressive cutting planes
+            m.setParam("Presolve", 2)           # Aggressive presolve
+
+        #m.setParam("OutputFlag", 0)
         m.update()
         return m, I
 
@@ -862,7 +907,7 @@ class TwoStageSPModel:
         return average_cost, total_costs
 
     ### First-stage
-    def master_problem(self, thetaLB):
+    def master_problem(self, thetaLB, model_version=1):
 
         V = self.network_processor.V
         R = self.network_processor.R
@@ -872,6 +917,9 @@ class TwoStageSPModel:
         T_Bef = self.network_processor.T_Bef
         A = self.network_processor.A
         I_ir0 = self.network_processor.I_ir0
+        C_i0 = self.network_processor.C_i0
+        h_i = self.network_processor.h_i
+        t_ijt = self.network_processor.t_ijt
         K_ijt = self.network_processor.K_ijt
         w_r = self.network_processor.w_r
 
@@ -885,6 +933,36 @@ class TwoStageSPModel:
             for r in range(R):
                 for t in range(T):
                     self.I[i, r, t] = self.master_model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"I_{i}_{r}_{t}")
+
+        # Add vehicle-related first-stage decision variables for Model 2
+        if model_version == 2:
+            self.K = {}
+            for i in range(V):
+                for j in range(V):
+                    if (i, j) in A:
+                        for t in range(T):
+                            self.K[i, j, t] = self.master_model.addVar(vtype=GRB.INTEGER, lb=0, name=f"K_{i}_{j}_{t}")
+
+            self.J = {}
+            for i in range(V):
+                for t in range(T):
+                    self.J[i, t] = self.master_model.addVar(vtype=GRB.INTEGER, lb=0, name=f"J_{i}_{t}")
+
+            # Vehicle initializtion constraint
+            for i in range(V):
+                self.master_model.addConstr(self.J[i, 0] == C_i0[i], name="VehicleInit_%s" % i)
+            
+            # Vehicle flow balance constraint
+            for i in range(V):
+                for t in range(T - 1):
+                    outgoing = gp.quicksum(self.K[i, j, t] for j in range(V) if (i, j) in A)
+                    incoming = gp.LinExpr()
+                    for j in range(V):
+                        if (j, i) in A:
+                            t_prime = t - t_ijt[j][i] - 1 - h_i[i]
+                            if t_prime >= 0:
+                                incoming += self.K[j, i, t_prime]
+                    self.master_model.addConstr(self.J[i, t + 1] == self.J[i, t] - outgoing + incoming, name="VehicleCont_%s_%s" % (i, t))
 
         #Define the auxiliary variable
         self.theta = self.master_model.addVar(vtype=GRB.CONTINUOUS, lb=thetaLB, name="theta")
@@ -907,32 +985,33 @@ class TwoStageSPModel:
                 for t in T_Bef[1:]:
                     self.master_model.addConstr(self.I[i, r, t] >= self.I[i, r, t-1], name=f"inventory_increase_pod_{i}_{r}_{t}")
 
-        #Lower bound of inventory at warehouses (V0)
-        for i in V0:
-            for r in range(R):
-                for t in range(1, T): 
-                    # Calculate the total arc capacity for the current time period
-                    arc_capacity = sum(K_ijt[i][j][t] for j in range(V) if (i, j) in A)
-                    # Calculate max outflow for commodity r
-                    max_outflow_r = arc_capacity  / w_r[r]
-                    if I_ir0[i][r] >= max_outflow_r:
-                        self.master_model.addConstr(self.I[i, r, t] >= I_ir0[i][r] - max_outflow_r, name=f"LowerBound_Warehouse_{i}_{r}_{t}")
+        if model_version == 1:
+            #Lower bound of inventory at warehouses (V0)
+            for i in V0:
+                for r in range(R):
+                    for t in range(1, T): 
+                        # Calculate the total arc capacity for the current time period
+                        arc_capacity = sum(K_ijt[i][j][t] for j in range(V) if (i, j) in A)
+                        # Calculate max outflow for commodity r
+                        max_outflow_r = arc_capacity  / w_r[r]
+                        if I_ir0[i][r] >= max_outflow_r:
+                            self.master_model.addConstr(self.I[i, r, t] >= I_ir0[i][r] - max_outflow_r, name=f"LowerBound_Warehouse_{i}_{r}_{t}")
 
-        #Upper bound of inventory at PoDs (V3)
-        for i in V3:
-            for r in range(R):
-                for t in T_Bef[1:]:
-                    # Calculate the total arc capacity for the current time period
-                    arc_capacity = sum(K_ijt[j][i][t] for j in range(V) if (j, i) in A)
-                    # Calculate max inflow for commodity r
-                    max_inflow_r = arc_capacity / w_r[r]            
-                    self.master_model.addConstr(self.I[i, r, t] <= I_ir0[i][r] + max_inflow_r, name=f"UpperBound_PoD_{i}_{r}_{t}")
+            #Upper bound of inventory at PoDs (V3)
+            for i in V3:
+                for r in range(R):
+                    for t in T_Bef[1:]:
+                        # Calculate the total arc capacity for the current time period
+                        arc_capacity = sum(K_ijt[j][i][t] for j in range(V) if (j, i) in A)
+                        # Calculate max inflow for commodity r
+                        max_inflow_r = arc_capacity / w_r[r]            
+                        self.master_model.addConstr(self.I[i, r, t] <= I_ir0[i][r] + max_inflow_r, name=f"UpperBound_PoD_{i}_{r}_{t}")
 
         self.master_model.setObjective(self.theta, GRB.MINIMIZE)
         self.master_model.setParam("OutputFlag", 0)
         self.master_model.update()
 
-    def optimality_sub(self):
+    def optimality_sub(self, model_version=1):
         V = self.network_processor.V
         R = self.network_processor.R
         T = self.network_processor.T
@@ -1022,12 +1101,16 @@ class TwoStageSPModel:
             for j in range(V):
                 if (i, j) in A:  # Only consider valid links in A
                     for t in range(T):
-                            self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= -K_ijt[i][j][t],
-                                name=f"arc_capacity_opt_{i}_{j}_{t}")
+                            if model_version == 2:
+                                self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= 0,
+                                    name=f"arc_capacity_opt_{i}_{j}_{t}")
+                            else:
+                                self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= -K_ijt[i][j][t],
+                                    name=f"arc_capacity_opt_{i}_{j}_{t}")
 
         self.sub_opt.setParam("OutputFlag", 0)
 
-    def feasibility_sub(self):
+    def feasibility_sub(self, model_version=1):
         V = self.network_processor.V
         R = self.network_processor.R
         T = self.network_processor.T
@@ -1123,15 +1206,21 @@ class TwoStageSPModel:
             for j in range(V):
                 if (i, j) in A:  # Only consider valid links in A
                     for t in range(T):
-                        self.pi_feas_arc_capacity[i, j, t] = self.sub_feas.addConstr(
-                            -gp.quicksum(w_r[r] * self.f_feas[i, j, r, t] for r in range(R))
-                            + self.epsilon_3[i, j, t] >= -K_ijt[i][j][t],
-                            name=f"arc_capacity_feas_{i}_{j}_{t}")
+                        if model_version == 2:  
+                            self.pi_feas_arc_capacity[i, j, t] = self.sub_feas.addConstr(
+                                -gp.quicksum(w_r[r] * self.f_feas[i, j, r, t] for r in range(R))
+                                + self.epsilon_3[i, j, t] >= 0,
+                                name=f"arc_capacity_feas_{i}_{j}_{t}")
+                        else:
+                            self.pi_feas_arc_capacity[i, j, t] = self.sub_feas.addConstr(
+                                -gp.quicksum(w_r[r] * self.f_feas[i, j, r, t] for r in range(R))
+                                + self.epsilon_3[i, j, t] >= -K_ijt[i][j][t],
+                                name=f"arc_capacity_feas_{i}_{j}_{t}")
 
         # Disable Gurobi solver output
         self.sub_feas.setParam("OutputFlag", 0)
 
-    def benders(self, eps, thetaLB, time_limit):
+    def benders(self, eps, thetaLB, time_limit, model_version=1):
 
         V = self.network_processor.V
         R = self.network_processor.R
@@ -1168,8 +1257,10 @@ class TwoStageSPModel:
         num = len(sce)
 
         # Store first-stage decision variable values
-        self.I_values = {}
+        self.I_values = {}        
         self.theta_value = 0
+        if model_version == 2:
+            self.K_values = {}
 
         # Storage for optimality subproblem dual multipliers
         self.pi_opt_inventory_balance_U_val = {s: {} for s in range(num)}
@@ -1201,6 +1292,14 @@ class TwoStageSPModel:
                     for r in range(R):
                         for t in range(T):
                             self.I_values[i, r, t] = self.I[i, r, t].x  # Store decision variable values
+
+                # Extract K[i, j, t] only for Model 2
+                if model_version == 2:
+                    for i in range(V):
+                        for j in range(V):
+                            if (i, j) in A:
+                                for t in range(T):
+                                    self.K_values[i, j, t] = self.K[i, j, t].x
 
                 # Get the value of theta
                 self.theta_value = self.theta.x
@@ -1243,6 +1342,14 @@ class TwoStageSPModel:
                         for t in range(T - 1):
                             self.pi_opt_flow_conservation[i, r, t].setAttr(GRB.Attr.RHS, self.I_values[i, r, t + 1] - self.I_values[i, r, t])
 
+                # Update RHS for arc capacity constraints only for Model 2
+                if model_version == 2:
+                    for i in range(V):
+                        for j in range(V):
+                            if (i, j) in A:
+                                for t in range(T):
+                                    self.pi_opt_arc_capacity[i, j, t].setAttr(GRB.Attr.RHS, -self.K_values[i, j, t])
+
                 # Solve the optimality subproblem
                 self.sub_opt.optimize()
 
@@ -1267,7 +1374,7 @@ class TwoStageSPModel:
                     break;  # No need to continue checking other scenarios
 
                 else:
-                    print(f"Error: One of the scenario subproblems is infeasible (Status: {model.sub_opt.status})")
+                    print(f"Error: One of the scenario subproblems is infeasible (Status: {self.model.sub_opt.status})")
                     exit(0)
 
             print("FLAG =", self.FLAG)
@@ -1290,6 +1397,14 @@ class TwoStageSPModel:
                     for r in range(R):
                         for t in range(T - 1):
                             self.pi_feas_flow_conservation[i, r, t].setAttr(GRB.Attr.RHS, self.I_values[i, r, t + 1] - self.I_values[i, r, t])
+
+                # Update RHS for arc capacity constraints only for Model 2
+                if model_version == 2:
+                    for i in range(V):
+                        for j in range(V):
+                            if (i, j) in A:
+                                for t in range(T):
+                                    self.pi_feas_arc_capacity[i, j, t].setAttr(GRB.Attr.RHS, -self.K_values[i, j, t])
 
                 # Solve the feasibility subproblem
                 self.sub_feas.optimize()
@@ -1330,7 +1445,10 @@ class TwoStageSPModel:
                     # Add arc capacity terms
                     for key, dual_val in self.pi_feas_arc_capacity_val.items():
                         i, j, t = key
-                        feasibility_cut_expr += dual_val * -K_ijt[i][j][t]
+                        if model_version == 2:
+                            feasibility_cut_expr += dual_val * (-self.K[i, j, t])
+                        else:
+                            feasibility_cut_expr += dual_val * -K_ijt[i][j][t]
 
                     # Add the feasibility cut to the master problem
                     self.master_model.addConstr(feasibility_cut_expr <= 0, name=f"feasibility_cut_scenario_{s}")
@@ -1372,7 +1490,10 @@ class TwoStageSPModel:
                         # Add arc capacity constraints
                         for key, dual_val in self.pi_opt_arc_capacity_val[s].items():
                             i, j, t = key
-                            optimality_cut_expr += P[s] * dual_val * -K_ijt[i][j][t]
+                            if model_version == 2:
+                                optimality_cut_expr += P[s] * dual_val * (-self.K[i, j, t])
+                            else:
+                                optimality_cut_expr += P[s] * dual_val * -K_ijt[i][j][t]
 
                     # Add the optimality cut to the master model
                     self.master_model.addConstr(self.theta >= optimality_cut_expr, name="optimality_cut")
