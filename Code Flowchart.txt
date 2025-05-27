@@ -1,0 +1,93 @@
+[Start]
+   |
+   v
+[Parse Args & Load Params from YAML]
+   |
+   v
+[Initialize NetworkData]
+   └── define_sets()
+   └── define_parameters()
+   |
+   v
+[Initialize DemandData]
+   ** It comes with two modes:
+	└── When debug_mode is on, we save the demand generated at each step in an excel file to check on them.
+   	└── When debug_mode is off, we just save them in memory to save time.
+   └── load_input_files():
+         └── Load PoD population from Excel
+         └── Load distance matrix (PoD → Shelter)
+         └── Compute inverse-distance weights
+   └── generate_in_sample_demand():
+         └── Simulate hurricane states (track, intensity)
+         └── Compute PoD-level demand per scenario
+         └── Scale by population and save to CSVs
+         └── Save landfall states to Excel
+   └── allocate_demand():
+         └── Load PoD demand CSVs
+         └── Distribute to shelters using inverse-distance weights
+         └── Save scenario-wise shelter demand to Excel
+   └── calculate_landfall_demand():
+         └── Use wind speed & evac rates to compute PoD demand
+         └── Save total demand to Excel (per scenario)
+   └── distribute_demand_by_time():
+         └── Use normal distribution to split demand over T_Aft
+         └── Save time-distributed demand to Excel
+   └── combine_demand_data():
+         └── Merge shelter and PoD demand per scenario
+         └── Create a unified Excel file for all demand
+   └── generate_scenario_data():
+         └── Define scenario indices and equal probabilities
+         └── Prepare Excel sheet names
+   └── load_demand_data():
+         └── Read demand from Excel for each scenario
+         └── Populate d_its dictionary (i, t, s)
+   |
+   v
+[Reading Network Structure]
+   |
+   v
+[Select and Run One Model]
+   ├── [1] Extended Model
+         └── TwoStageSPModel.ext_model()
+         └── ext_model.optimize()
+         └── extract_all_inventory()
+         └── output.ext_results()
+         └── [Optional: Run Out-of-Sample Evaluation]
+               └── load_input_files()
+               └── for each out-of-sample path:
+                     └── generate_current_demand():
+                           └── Generate demand at current time (t_bar=0) from s_t
+                     └── generate_future_demand():
+                           └── Generate demand from t > t_bar=0 to t_L
+                     └── generate_post_landfall_demand():
+                           └── Compute post-landfall PoD demand for t > t_L
+                     └── OOS_2SSP()
+               └── output.oos_2SSP_results()
+   ├── [2] Benders Decomposition
+   │     └── master_problem(), optimality_sub(), feasibility_sub(), benders()
+   │     └── output.benders_results()
+   │
+   ├── [3] MVP Model
+   │     └── compute_expected_demand()
+   │     └── ext_model(is_mvp=True)
+   │     └── optimize() + compute_mvp_objective()
+   │     └── output.mvp_results()
+   └── [4] Rolling Horizon (RH)
+         └── RH_evaluation()
+             └── For each sample path:
+                         └── Loop over t_bar ≤ t_L:
+                               └── generate_current_demand()
+                               └── generate_future_demand()
+                               └── generate_post_landfall_demand()
+                               └── RH_model_creator()
+                               └── RH_model_solver()
+                               └── calculate_cost_rh()
+                               └── RH_sol_creator()
+                         └── RH_terminal_model()
+                         └── RH_model_solver()
+                         └── calculate_cost_terminal()
+                   └── Return average cost and cost per path
+         └── output.rh_results()
+   |
+   v
+[End]

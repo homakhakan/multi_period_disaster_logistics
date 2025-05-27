@@ -3,7 +3,7 @@ import gurobipy as gp
 import os
 from openpyxl import load_workbook
 
-def ext_results(model_instance, model, instance_version, num_sce, total_time, multiplier1, multiplier2, multiplier3, output_filename="ext_results.xlsx"):
+def ext_results(model_instance, model, instance_version, num_sce, total_time, multiplier1, multiplier2, multiplier3, model_version, output_filename="ext_results.xlsx"):
 
     if model.status == gp.GRB.OPTIMAL:
         obj_value = model.objVal  # Extract objective value
@@ -75,6 +75,7 @@ def ext_results(model_instance, model, instance_version, num_sce, total_time, mu
         # Create DataFrame with instance details and objective function
         df = pd.DataFrame({
             "Instance Version": [instance_version],
+            "Model Version": [model_version],
             "Number of Scenarios": [num_sce],
             "Objective Value": [obj_value],
             "Time (seconds)": [total_time],
@@ -162,11 +163,12 @@ def save_full_oos_demand(full_demand, network_processor, output_file="full_oos_d
     df.to_excel(output_file, index=False)
     print(f"✅ Full OOS demand saved to: {output_file}")
 
-def benders_results(instance_version, num_sce, total_time_benders, LB, UB, output_filename="benders_results.xlsx"):
+def benders_results(instance_version, num_sce, total_time_benders, LB, UB, model_version, output_filename="benders_results.xlsx"):
 
     # Create a DataFrame with Benders results
     df = pd.DataFrame({
         "Instance Version": [instance_version],
+        "Model Version": [model_version],
         "Number of Scenarios": [num_sce],
         "Lower Bound": [LB],
         "Upper Bound": [UB],
