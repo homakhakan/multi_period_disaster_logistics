@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
-    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH")
+    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = original (fixed arc capacity), 2 = with vehicle routing decisions")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
@@ -247,4 +247,31 @@ if __name__ == "__main__":
             average_cost=avg_cost,
             path_costs=total_costs,
             output_filename="Results/rh_results.xlsx"
+        )
+
+    elif args.solution_method == 5:
+        rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        
+        sample_paths_file = "Data/real_sample_paths_new.csv"  # make sure this exists on Palmetto
+
+        start_time_rh = time.time()
+        avg_cost, total_costs = rh_model_instance.RH_evaluation_parallel(
+            sample_paths_file=sample_paths_file,
+            demand_processor=demand_processor,
+            network_processor=network_processor
+        )
+        end_time_rh = time.time()
+        total_time_rh = end_time_rh - start_time_rh
+
+        print(f"\n📊 Average RH Objective Value: {avg_cost:.2f}")
+        print(f"🧾 Total RH Costs per Sample Path: {total_costs}")
+        print(f"⏱️ Total Execution Time for RH Evaluation: {total_time_rh:.2f} seconds")
+
+        output.rh_results(
+            instance_version=args.instance_version,
+            num_sce=args.num_sce,
+            total_time=total_time_rh,
+            average_cost=avg_cost,
+            path_costs=total_costs,
+            output_filename="Results/rh_results_parallel.xlsx"
         )

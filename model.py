@@ -5,6 +5,7 @@ import numpy as np
 from demand_data import DemandData
 import time
 import os
+from concurrent.futures import ProcessPoolExecutor
 
 ### Extended
 class TwoStageSPModel:
@@ -906,6 +907,135 @@ class TwoStageSPModel:
 
         return average_cost, total_costs
 
+    def RH_evaluation_parallel(self, sample_paths_file, demand_processor, network_processor):
+        """
+        Parallel evaluation of the rolling horizon model over multiple out-of-sample sample paths.
+        Each path is solved independently in a separate process.
+        Returns the average cost and individual total costs.
+        """
+        from demand_generation import data, in_sample
+
+        nbOS = demand_processor.nbOS
+
+        # Load all sample paths from CSV
+        OS_paths_df = pd.read_csv(sample_paths_file)
+        OS_paths = OS_paths_df.values
+        nbOS = OS_paths.shape[0]
+
+        print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths...")
+
+        total_costs = [None] * nbOS  # to preserve order
+
+        # Run in parallel using available CPU cores
+        with ProcessPoolExecutor() as executor:
+            futures = [
+                executor.submit(
+                    self.solve_single_sample_path,
+                    k,
+                    OS_paths[k],
+                    sample_paths_file,
+                    demand_processor,
+                    network_processor
+                )
+                for k in range(nbOS)
+            ]
+
+            for k, future in enumerate(futures):
+                try:
+                    total_costs[k] = future.result()
+                    print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
+                except Exception as e:
+                    print(f"❌ Sample path {k} failed: {e}")
+                    total_costs[k] = np.nan
+
+        average_cost = np.nanmean(total_costs)
+
+        print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
+
+        return average_cost, total_costs
+
+    def solve_single_sample_path(self, k, sample_path_row, sample_paths, demand_processor, network_processor):
+        """
+        Solves a single out-of-sample sample path (k).
+        Used by the parallel RH evaluation.
+        """
+        from demand_generation import data, in_sample
+
+        t_L = network_processor.t_L
+        T = network_processor.T
+
+        print("Sample path=", k)
+        self.fixed_flow_all = {}
+        t_bar = 0
+        sol = {}  # Initial state
+        cost_k = 0  # Total cost for sample path k
+
+        # Rolling loop over time steps
+        while t_bar <= t_L:
+            print("t_bar=", t_bar)
+            s_t = eval(sample_path_row[t_bar])  # Converts '(-23.55, 0)' to (-23.55, 0)
+
+            # Generate the demand at t_bar only based on the realized current state of the hurricane
+            demand_processor.generate_current_demand(t_bar, s_t, network_processor, data, solution_method=4)
+
+            # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
+            # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
+            in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
+
+            # Identify which in-sample scenario matches the realized state s_t
+            s_realized = None
+            for s in range(self.num_sce):
+                if tuple(in_sample_paths[s, t_bar]) == s_t:
+                    s_realized = s
+                    break
+
+            if s_realized is None:
+                raise ValueError(f"No in-sample scenario matches realized state s_t = {s_t} at t_bar = {t_bar}")
+
+            # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
+            demand_processor.generate_future_demand(t_bar, s_t, t_L, network_processor, in_sample_paths, solution_method=4)  
+
+            demand_processor.generate_post_landfall_demand(t_L, in_sample_paths, network_processor, solution_method=4)
+
+            # Build the model for current roll
+            model, I, U, S, f = self.RH_model_creator(t_bar, sol)
+            
+            # Solve the model
+            obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})
+            print(f"Objective value at time t_bar = {t_bar}: {obj_val}")
+
+            if obj_val is None:
+                print(f"Skipping sample path {k} at t_bar={t_bar} due to infeasibility.")
+                exit(0)              
+
+            cost_k += self.calculate_cost_rh(variable_values, t_bar, s_t)
+
+            # Accumulate fixed flows made at t_bar
+            for (i, j, r, t, s), val in variable_values["f"].items():
+                if t == t_bar:
+                    self.fixed_flow_all[(i, j, r, t, s)] = val
+            
+            # Update the rolling state for next time step (should be before model creation, because we need updated sol to create the model every time)
+            sol = self.RH_sol_creator(variable_values, t_bar, s_realized)
+
+            # Advance to the next time step
+            t_bar += 1
+            
+        # Now solve the terminal deterministic model from t_L + 1 to T - 1
+        terminal_model, I_term, U_term, S_term, f_term = self.RH_terminal_model(sol, s_t, sample_paths)
+
+        obj_term, var_term = self.RH_model_solver(terminal_model, {"I": I_term, "U": U_term, "S": S_term, "f": f_term})
+        print(f"Objective value from terminal model (t ∈ [{t_L + 1}, {T - 1}]): {obj_term}")
+
+        if obj_term is not None:
+            cost_k += self.calculate_cost_terminal(var_term, t_L)
+        else:
+            print(f"Terminal stage for sample path {k} was infeasible.")
+            exit(0)   
+
+        # Return the cost for this sample path
+        return cost_k
+    
     ### First-stage
     def master_problem(self, thetaLB, model_version=1):
 
