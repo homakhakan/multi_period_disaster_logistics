@@ -46,6 +46,7 @@ if __name__ == "__main__":
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH")
+    parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = original (fixed arc capacity), 2 = with vehicle routing decisions")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
@@ -104,7 +105,7 @@ if __name__ == "__main__":
         ext_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         start_time_ext = time.time()
 
-        ext_model, I_vars = ext_model_instance.ext_model()
+        ext_model, I_vars = ext_model_instance.ext_model(model_version=args.model)
         ext_model.optimize()
 
         end_time_ext = time.time()
@@ -113,7 +114,7 @@ if __name__ == "__main__":
         # Print and save results
         if ext_model.Status == gp.GRB.OPTIMAL:
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
-            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, output_filename="Results/ext_results.xlsx")
+            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier2, network_processor.multiplier3, model_version=args.model, output_filename="Results/ext_results.xlsx")
             
             fixed_I_irt = ext_model_instance.extract_all_inventory(I_vars)
         else:
@@ -178,17 +179,17 @@ if __name__ == "__main__":
 
     elif args.solution_method == 2:
         benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
-        benders_model_instance.master_problem(thetaLB)
-        benders_model_instance.optimality_sub()
-        benders_model_instance.feasibility_sub()
+        benders_model_instance.master_problem(thetaLB, model_version=args.model)
+        benders_model_instance.optimality_sub(model_version=args.model)
+        benders_model_instance.feasibility_sub(model_version=args.model)
         start_time_benders = time.time()
 
-        LB, UB, num_iter, num_Fcuts, num_Ocuts = benders_model_instance.benders(eps, thetaLB, args.time_limit)
+        LB, UB, num_iter, num_Fcuts, num_Ocuts = benders_model_instance.benders(eps, thetaLB, args.time_limit, model_version=args.model)
 
         end_time_benders = time.time()
         total_time_benders = end_time_benders - start_time_benders
 
-        output.benders_results(args.instance_version, args.num_sce, total_time_benders, LB, UB, output_filename="Results/benders_results.xlsx")
+        output.benders_results(args.instance_version, args.num_sce, total_time_benders, LB, UB, model_version=args.model, output_filename="Results/benders_results.xlsx")
         print(f"Total Execution Time for Benders: {total_time_benders:.2f} seconds")
 
     elif args.solution_method == 3:
