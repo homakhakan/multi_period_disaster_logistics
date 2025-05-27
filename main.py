@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
-    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel)")
+    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = original (fixed arc capacity), 2 = with vehicle routing decisions")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
