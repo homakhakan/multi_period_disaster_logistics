@@ -927,7 +927,7 @@ class TwoStageSPModel:
         total_costs = [None] * nbOS  # to preserve order
 
         # Run in parallel using available CPU cores
-        with ProcessPoolExecutor(max_workers=5) as executor:
+        with ProcessPoolExecutor(max_workers=32) as executor:
             futures = [
                 executor.submit(
                     self.solve_single_sample_path,
