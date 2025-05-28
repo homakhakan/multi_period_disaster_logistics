@@ -104,7 +104,7 @@ def ext_results(model_instance, model, instance_version, num_sce, total_time, mu
     else:
         print("Model did not find an optimal solution. Objective not stored.")
 
-def oos_2SSP_results(costs, instance_version, num_oos, output_filename="oos_results.xlsx"):
+def oos_2SSP_results(costs, instance_version, num_oos, output_filename="oos_results.xlsx", total_time=None):
     """
     Save individual and average out-of-sample (OOS) costs to an Excel file.
 
@@ -117,7 +117,8 @@ def oos_2SSP_results(costs, instance_version, num_oos, output_filename="oos_resu
 
     df_avg = pd.DataFrame({
         "Scenario": ["Average"],
-        "Cost": [sum(costs) / len(costs)]
+        "Cost": [sum(costs) / len(costs)],
+        "Time (sec)": [total_time if total_time is not None else None]
     })
 
     combined_df = pd.concat([df, df_avg], ignore_index=True)

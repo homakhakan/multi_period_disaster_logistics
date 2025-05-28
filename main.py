@@ -128,6 +128,9 @@ if __name__ == "__main__":
             raise RuntimeError("You must solve the model once, before running OOS evaluation.")        
 
         # -------- OOS Evaluation for Static 2SSP --------------------
+
+        start_time = time.time()
+
         print("\nStarting OOS evaluation...")
         total_costs = []
 
@@ -170,12 +173,15 @@ if __name__ == "__main__":
             total_costs.append(cost)
             print(f"   ➤ Cost = {cost:.2f}")
 
+        total_eval_time = time.time() - start_time  # End timer
+        print(f"\n Total OOS Evaluation Time: {total_eval_time:.2f} seconds")
+
         # Final summary
         avg_cost = np.mean(total_costs)
         print(f"\n✅ Average OOS Cost over {args.num_oos} scenarios: {avg_cost:.2f}")
 
         # Save to Excel
-        output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, output_filename="Results/oos_2SSP_results.xlsx")
+        output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, total_time=total_eval_time, output_filename="Results/oos_2SSP_results.xlsx")
 
     elif args.solution_method == 2:
         benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
