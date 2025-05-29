@@ -973,7 +973,7 @@ class TwoStageSPModel:
         total_costs = [None] * nbOS  # to preserve order
 
         # Define batching parameters
-        BATCH_SIZE = 32  # Match this to --cpus-per-task from SLURM script
+        BATCH_SIZE = 16  # Match this to --cpus-per-task from SLURM script
         num_batches = math.ceil(nbOS / BATCH_SIZE)
 
         print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths in {num_batches} batches of {BATCH_SIZE}...")
