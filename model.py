@@ -5,7 +5,7 @@ import numpy as np
 from demand_data import DemandData
 import time
 import os
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 ### Extended
 class TwoStageSPModel:
