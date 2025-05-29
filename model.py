@@ -907,109 +907,109 @@ class TwoStageSPModel:
 
         return average_cost, total_costs
 
-    # def RH_evaluation_parallel(self, sample_paths_file, demand_processor, network_processor):
-    #     """
-    #     Parallel evaluation of the rolling horizon model over multiple out-of-sample sample paths.
-    #     Each path is solved independently in a separate process.
-    #     Returns the average cost and individual total costs.
-    #     """
-    #     from demand_generation import data, in_sample
-
-    #     # Load all sample paths from CSV
-    #     OS_paths_df = pd.read_csv(sample_paths_file)
-
-    #     # Use only as many OOS paths as specified by demand_processor.nbOS
-    #     nbOS = demand_processor.nbOS
-    #     OS_paths = OS_paths_df.values[:nbOS]
-
-    #     print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths...")
-
-    #     total_costs = [None] * nbOS  # to preserve order
-
-    #     # Run in parallel using available CPU cores
-    #     with ProcessPoolExecutor(max_workers=32) as executor:
-    #         futures = [
-    #             executor.submit(
-    #                 self.solve_single_sample_path,
-    #                 k,
-    #                 OS_paths[k],
-    #                 sample_paths_file,
-    #                 demand_processor,
-    #                 network_processor
-    #             )
-    #             for k in range(nbOS)
-    #         ]
-
-    #         for k, future in enumerate(futures):
-    #             try:
-    #                 total_costs[k] = future.result()
-    #                 print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
-    #             except Exception as e:
-    #                 print(f"❌ Sample path {k} failed: {e}")
-    #                 total_costs[k] = np.nan
-
-    #     average_cost = np.nanmean(total_costs)
-
-    #     print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
-
-    #     return average_cost, total_costs
-
     def RH_evaluation_parallel(self, sample_paths_file, demand_processor, network_processor):
         """
         Parallel evaluation of the rolling horizon model over multiple out-of-sample sample paths.
-        Each batch is processed sequentially to avoid memory overload.
-        Each sample path within a batch is solved in parallel.
+        Each path is solved independently in a separate process.
         Returns the average cost and individual total costs.
         """
         from demand_generation import data, in_sample
-        import math
 
         # Load all sample paths from CSV
         OS_paths_df = pd.read_csv(sample_paths_file)
 
-        # Use only as many OOS paths as specified
+        # Use only as many OOS paths as specified by demand_processor.nbOS
         nbOS = demand_processor.nbOS
         OS_paths = OS_paths_df.values[:nbOS]
+
+        print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths...")
+
         total_costs = [None] * nbOS  # to preserve order
 
-        # Define batching parameters
-        BATCH_SIZE = 16  # Match this to --cpus-per-task from SLURM script
-        num_batches = math.ceil(nbOS / BATCH_SIZE)
+        # Run in parallel using available CPU cores
+        with ProcessPoolExecutor(max_workers=32) as executor:
+            futures = [
+                executor.submit(
+                    self.solve_single_sample_path,
+                    k,
+                    OS_paths[k],
+                    sample_paths_file,
+                    demand_processor,
+                    network_processor
+                )
+                for k in range(nbOS)
+            ]
 
-        print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths in {num_batches} batches of {BATCH_SIZE}...")
-
-        for batch_id in range(num_batches):
-            batch_start = batch_id * BATCH_SIZE
-            batch_end = min((batch_id + 1) * BATCH_SIZE, nbOS)
-            current_batch = range(batch_start, batch_end)
-
-            print(f"\n🚀 Processing batch {batch_id + 1}/{num_batches}: sample paths {batch_start} to {batch_end - 1}")
-
-            with ProcessPoolExecutor(max_workers=len(current_batch)) as executor:
-                futures = {
-                    executor.submit(
-                        self.solve_single_sample_path,
-                        k,
-                        OS_paths[k],
-                        sample_paths_file,
-                        demand_processor,
-                        network_processor
-                    ): k for k in current_batch
-                }
-
-                for future in as_completed(futures):
-                    k = futures[future]
-                    try:
-                        total_costs[k] = future.result()
-                        print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
-                    except Exception as e:
-                        print(f"❌ Sample path {k} failed: {e}")
-                        total_costs[k] = np.nan
+            for k, future in enumerate(futures):
+                try:
+                    total_costs[k] = future.result()
+                    print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
+                except Exception as e:
+                    print(f"❌ Sample path {k} failed: {e}")
+                    total_costs[k] = np.nan
 
         average_cost = np.nanmean(total_costs)
+
         print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
 
         return average_cost, total_costs
+
+    # def RH_evaluation_parallel(self, sample_paths_file, demand_processor, network_processor):
+    #     """
+    #     Parallel evaluation of the rolling horizon model over multiple out-of-sample sample paths.
+    #     Each batch is processed sequentially to avoid memory overload.
+    #     Each sample path within a batch is solved in parallel.
+    #     Returns the average cost and individual total costs.
+    #     """
+    #     from demand_generation import data, in_sample
+    #     import math
+
+    #     # Load all sample paths from CSV
+    #     OS_paths_df = pd.read_csv(sample_paths_file)
+
+    #     # Use only as many OOS paths as specified
+    #     nbOS = demand_processor.nbOS
+    #     OS_paths = OS_paths_df.values[:nbOS]
+    #     total_costs = [None] * nbOS  # to preserve order
+
+    #     # Define batching parameters
+    #     BATCH_SIZE = 16  # Match this to --cpus-per-task from SLURM script
+    #     num_batches = math.ceil(nbOS / BATCH_SIZE)
+
+    #     print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths in {num_batches} batches of {BATCH_SIZE}...")
+
+    #     for batch_id in range(num_batches):
+    #         batch_start = batch_id * BATCH_SIZE
+    #         batch_end = min((batch_id + 1) * BATCH_SIZE, nbOS)
+    #         current_batch = range(batch_start, batch_end)
+
+    #         print(f"\n🚀 Processing batch {batch_id + 1}/{num_batches}: sample paths {batch_start} to {batch_end - 1}")
+
+    #         with ProcessPoolExecutor(max_workers=len(current_batch)) as executor:
+    #             futures = {
+    #                 executor.submit(
+    #                     self.solve_single_sample_path,
+    #                     k,
+    #                     OS_paths[k],
+    #                     sample_paths_file,
+    #                     demand_processor,
+    #                     network_processor
+    #                 ): k for k in current_batch
+    #             }
+
+    #             for future in as_completed(futures):
+    #                 k = futures[future]
+    #                 try:
+    #                     total_costs[k] = future.result()
+    #                     print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
+    #                 except Exception as e:
+    #                     print(f"❌ Sample path {k} failed: {e}")
+    #                     total_costs[k] = np.nan
+
+    #     average_cost = np.nanmean(total_costs)
+    #     print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
+
+    #     return average_cost, total_costs
 
 
     def solve_single_sample_path(self, k, sample_path_row, sample_paths, demand_processor, network_processor):
