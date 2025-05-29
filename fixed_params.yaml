@@ -20,7 +20,7 @@ std_pod: 1
 
 
 # For sensitivity analysis
-MULTIPLIER1: 2 # Penalty cost multiplier
+MULTIPLIER1: 4 # Penalty cost multiplier
 MULTIPLIER2: 1 # Travel cost multiplier
 MULTIPLIER3: 1 # Arc capacity multiplier
 
