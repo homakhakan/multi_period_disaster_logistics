@@ -837,30 +837,6 @@ class TwoStageSPModel:
                 # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
                 demand_processor.generate_future_demand(t_bar, s_t, t_L, network_processor, in_sample_paths, solution_method=4)  
 
-                # # Create folder if it doesn't exist
-                # os.makedirs("demand_check/future", exist_ok=True)
-
-                # # Define output path
-                # file_path = f"6demand_check/future/RH_demand_future_t{t_bar}_s{s_t[0]:.2f}_{s_t[1]}.xlsx"
-
-                # # Save scenario-based future demand to multiple sheets
-                # with pd.ExcelWriter(file_path) as writer:
-                #     for s in range(self.num_sce):
-                #         data_rows = []
-                #         for t in range(t_bar + 1, t_L + 1):
-                #             for i in network_processor.V1:
-                #                 val = demand_processor.d_its.get((i, t, s), 0.0)
-                #                 data_rows.append({
-                #                     "Time": t,
-                #                     "Location": i,
-                #                     "Demand": val
-                #                 })
-
-                #         df = pd.DataFrame(data_rows)
-                #         df.to_excel(writer, sheet_name=f"Scenario_{s}", index=False)
-
-                # print(f"✅ Future demand saved for t_bar={t_bar}, s_t={s_t} → {file_path}")
-
                 demand_processor.generate_post_landfall_demand(t_L, in_sample_paths, network_processor, solution_method=4)
 
                 # Build the model for current roll
@@ -943,9 +919,9 @@ class TwoStageSPModel:
             for k, future in enumerate(futures):
                 try:
                     total_costs[k] = future.result()
-                    print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
+                    print(f"Sample path {k} completed with cost {total_costs[k]:.2f}")
                 except Exception as e:
-                    print(f"❌ Sample path {k} failed: {e}")
+                    print(f"Sample path {k} failed: {e}")
                     total_costs[k] = np.nan
 
         average_cost = np.nanmean(total_costs)
@@ -953,64 +929,6 @@ class TwoStageSPModel:
         print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
 
         return average_cost, total_costs
-
-    # def RH_evaluation_parallel(self, sample_paths_file, demand_processor, network_processor):
-    #     """
-    #     Parallel evaluation of the rolling horizon model over multiple out-of-sample sample paths.
-    #     Each batch is processed sequentially to avoid memory overload.
-    #     Each sample path within a batch is solved in parallel.
-    #     Returns the average cost and individual total costs.
-    #     """
-    #     from demand_generation import data, in_sample
-    #     import math
-
-    #     # Load all sample paths from CSV
-    #     OS_paths_df = pd.read_csv(sample_paths_file)
-
-    #     # Use only as many OOS paths as specified
-    #     nbOS = demand_processor.nbOS
-    #     OS_paths = OS_paths_df.values[:nbOS]
-    #     total_costs = [None] * nbOS  # to preserve order
-
-    #     # Define batching parameters
-    #     BATCH_SIZE = 16  # Match this to --cpus-per-task from SLURM script
-    #     num_batches = math.ceil(nbOS / BATCH_SIZE)
-
-    #     print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths in {num_batches} batches of {BATCH_SIZE}...")
-
-    #     for batch_id in range(num_batches):
-    #         batch_start = batch_id * BATCH_SIZE
-    #         batch_end = min((batch_id + 1) * BATCH_SIZE, nbOS)
-    #         current_batch = range(batch_start, batch_end)
-
-    #         print(f"\n🚀 Processing batch {batch_id + 1}/{num_batches}: sample paths {batch_start} to {batch_end - 1}")
-
-    #         with ProcessPoolExecutor(max_workers=len(current_batch)) as executor:
-    #             futures = {
-    #                 executor.submit(
-    #                     self.solve_single_sample_path,
-    #                     k,
-    #                     OS_paths[k],
-    #                     sample_paths_file,
-    #                     demand_processor,
-    #                     network_processor
-    #                 ): k for k in current_batch
-    #             }
-
-    #             for future in as_completed(futures):
-    #                 k = futures[future]
-    #                 try:
-    #                     total_costs[k] = future.result()
-    #                     print(f"✅ Sample path {k} completed with cost {total_costs[k]:.2f}")
-    #                 except Exception as e:
-    #                     print(f"❌ Sample path {k} failed: {e}")
-    #                     total_costs[k] = np.nan
-
-    #     average_cost = np.nanmean(total_costs)
-    #     print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
-
-    #     return average_cost, total_costs
-
 
     def solve_single_sample_path(self, k, sample_path_row, sample_paths, demand_processor, network_processor):
         """
