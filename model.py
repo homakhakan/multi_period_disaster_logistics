@@ -898,12 +898,12 @@ class TwoStageSPModel:
         nbOS = demand_processor.nbOS
         OS_paths = OS_paths_df.values[:nbOS]
 
-        print(f"🌀 Starting parallel RH evaluation for {nbOS} sample paths...")
+        print(f"Starting parallel RH evaluation for {nbOS} sample paths...")
 
         total_costs = [None] * nbOS  # to preserve order
 
         # Run in parallel using available CPU cores
-        with ProcessPoolExecutor(max_workers=32) as executor:
+        with ProcessPoolExecutor() as executor:
             futures = [
                 executor.submit(
                     self.solve_single_sample_path,
@@ -926,7 +926,7 @@ class TwoStageSPModel:
 
         average_cost = np.nanmean(total_costs)
 
-        print(f"\n✅ Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
+        print(f"\n Average Rolling Horizon Cost (across {nbOS} OOS paths): {average_cost:.2f}")
 
         return average_cost, total_costs
 
