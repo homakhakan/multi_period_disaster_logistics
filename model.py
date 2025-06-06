@@ -251,8 +251,9 @@ class TwoStageSPModel:
             m.setParam("MIPFocus", 1)           # Focus on finding feasible solutions
             m.setParam("Cuts", 2)               # Try more aggressive cutting planes
             m.setParam("Presolve", 2)           # Aggressive presolve
+            m.setParam("MIPGap", 0.1)           # Stop when MIP gap reaches 10%
 
-        m.setParam("OutputFlag", 0)
+        #m.setParam("OutputFlag", 0)
         m.update()
         return m, I
 
