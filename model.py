@@ -1014,8 +1014,9 @@ class TwoStageSPModel:
         for (i, t, s), demand_val in demand_processor.d_its.items():
             if t >= t_bar:
                 cname = f"DemandShortageUpdate_{i}_{t}_{s}"
-                if cname in model.getConstrsByName():
-                    model.getConstrByName(cname).setAttr("RHS", demand_val)
+                constr = model.getConstrByName(cname)
+                if constr is not None:
+                    constr.setAttr("RHS", demand_val)
 
         model.update()
 
