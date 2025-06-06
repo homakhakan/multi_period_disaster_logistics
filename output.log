@@ -1,0 +1,74 @@
+
+Generating in-sample demand...
+✅ Demand allocation completed in memory.
+✅ Landfall demand generated in memory.
+✅ Distributed demand computed in memory.
+✅ Combined demand data prepared in memory.
+
+Reading data...
+
+All counties: 7
+All locations: 43
+Warehouse/Supplier locations: 6, [0, 1, 2, 3, 4, 5]
+Shelter locations: 21, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
+RSA locations: 9, [27, 28, 29, 30, 31, 32, 33, 34, 35]
+PoD locations: 7, [36, 37, 38, 39, 40, 41, 42]
+All resources: 6
+Time periods: 16
+Time Before Landfall: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+Time After Landfall: [10, 11, 12, 13, 14, 15]
+Scenario probabilities: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
+🌀 Starting parallel RH evaluation for 100 sample paths in 7 batches of 16...
+
+🚀 Processing batch 1/7: sample paths 0 to 15
+Sample path= 0
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 1
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 2
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 3
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 4
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 5
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 6
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 7
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 8
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 9
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 10
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 11
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 12
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 13
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 14
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+Sample path= 15
+t_bar= 0
+Set parameter TokenServer to value "license8.clemson.edu"
+slurmstepd: error: *** JOB 3532705 ON node1673 CANCELLED AT 2025-06-06T18:59:31 ***
+slurmstepd: error: *** STEP 3532705.0 ON node1673 CANCELLED AT 2025-06-06T18:59:31 ***
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
