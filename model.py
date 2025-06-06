@@ -962,9 +962,13 @@ class TwoStageSPModel:
 
                 else:
                     model, I, U, S, f = model_dict[t_bar]
+                    
                     ### Update the new model info ###
+                    # Only update model state if t_bar > 0 (sol is available)
+                    if t_bar > 0:
+                        self.update_init_data(model, sol, t_bar)
                     self.update_demand_data(model, demand_processor, t_bar)
-                    self.update_init_data(model, sol, t_bar)
+
 
                 # Solve the model
                 obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})
@@ -1010,13 +1014,26 @@ class TwoStageSPModel:
     def update_demand_data(self, model, demand_processor, t_bar):
         """
         Updates RHS for demand shortage update constraints at each t >= t_bar.
+        Handles both scenario-based (i, t, s) and deterministic post-landfall (i, t) keys.
         """
-        for (i, t, s), demand_val in demand_processor.d_its.items():
-            if t >= t_bar:
-                cname = f"DemandShortageUpdate_{i}_{t}_{s}"
-                constr = model.getConstrByName(cname)
-                if constr is not None:
-                    constr.setAttr("RHS", demand_val)
+        for key, demand_val in demand_processor.d_its.items():
+            if len(key) == 3:
+                i, t, s = key
+                if t >= t_bar:
+                    cname = f"DemandShortageUpdate_{i}_{t}_{s}"
+                    constr = model.getConstrByName(cname)
+                    if constr is not None:
+                        constr.setAttr("RHS", demand_val)
+
+            elif len(key) == 2:
+                i, t = key
+                if t >= t_bar:
+                    # Update this for all scenarios, since post-landfall demand is same for all s
+                    for s in range(self.num_sce):  # Or use network_processor.num_sce
+                        cname = f"DemandShortageUpdate_{i}_{t}_{s}"
+                        constr = model.getConstrByName(cname)
+                        if constr is not None:
+                            constr.setAttr("RHS", demand_val)
 
         model.update()
 
