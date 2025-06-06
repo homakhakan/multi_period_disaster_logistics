@@ -962,7 +962,7 @@ class TwoStageSPModel:
 
                 else:
                     model, I, U, S, f = model_dict[t_bar]
-                    
+
                     ### Update the new model info ###
                     # Only update model state if t_bar > 0 (sol is available)
                     if t_bar > 0:
@@ -1048,8 +1048,8 @@ class TwoStageSPModel:
         for (i, r, t), value in sol["I"].items():
             if t == t_bar:
                 cname = f"InitInv_{i}_{r}_{t_bar}"
-                if cname in model.getConstrsByName():
-                    constr = model.getConstrByName(cname)
+                constr = model.getConstrByName(cname)
+                if constr is not None:
                     constr.setAttr("RHS", value)
 
         # Update initial unmet demand values
@@ -1057,8 +1057,8 @@ class TwoStageSPModel:
             if t == t_bar:
                 for s in range(self.num_sce):
                     cname = f"InitUnmet_{i}_{s}_{t_bar}"
-                    if cname in model.getConstrsByName():
-                        constr = model.getConstrByName(cname)
+                    constr = model.getConstrByName(cname)
+                    if constr is not None:
                         constr.setAttr("RHS", value)
 
         model.update()
