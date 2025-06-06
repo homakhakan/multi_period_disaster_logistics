@@ -963,8 +963,8 @@ class TwoStageSPModel:
                 else:
                     model, I, U, S, f = model_dict[t_bar]
                     ### Update the new model info ###
-                    self.update_init_data(model, sol, t_bar)
                     self.update_demand_data(model, demand_processor, t_bar)
+                    self.update_init_data(model, sol, t_bar)
 
                 # Solve the model
                 obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})
