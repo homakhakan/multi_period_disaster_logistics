@@ -1,5 +1,5 @@
 # Network
-TPERIOD: 12 # Time discretization in hours
+TPERIOD: 24 # Time discretization in hours
 T_BEF: 10 # Time periods before landfall (T_Bef)
 MILES_TO_METERS: 0.000621371
 
