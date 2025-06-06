@@ -882,6 +882,168 @@ class TwoStageSPModel:
         average_cost = np.mean(total_costs)
 
         return average_cost, total_costs
+    
+    def RH_evaluation_new(self, sample_paths, demand_processor, network_processor):
+        """
+        Evaluates the rolling horizon model over multiple out-of-sample sample paths.
+        For each sample path:
+        - Iteratively builds and solves the RH model at each time step,
+        - Updates the state with realized values,
+        - Tracks costs (penalty and transportation),
+        - Solves a terminal model at the end of the horizon.
+
+        Returns the average cost and the individual total costs for all sample paths.
+        """
+        from demand_generation import data, in_sample
+
+        T = network_processor.T
+        P = self.demand_processor.P
+        V = self.network_processor.V
+        V0 = self.network_processor.V0
+        R = self.network_processor.R
+        A = self.network_processor.A
+        nbOS = demand_processor.nbOS
+        t_L = network_processor.t_L
+
+        start_time = time.time()
+
+        # Ensure PoD location info is loaded (used for post-landfall PoD demand)
+        if not hasattr(demand_processor, "pod_info_df"):
+            demand_processor.pod_info_df = pd.read_excel("PoD location information.xlsx", sheet_name="Sheet1")
+
+        # Load sample paths from CSV
+        OS_paths_df = pd.read_csv(sample_paths)
+        OS_paths = OS_paths_df.values
+        total_costs = np.zeros(nbOS)  # Total cost for each sample path
+
+        # Stores models built during the first sample path
+        # These models are reused across all sample paths to reduce memory usage
+        model_dict = {} 
+
+        for k in range(nbOS):
+            print("Sample path=", k)
+            sample_path_row = OS_paths[k]  # 1D array for path k
+            self.fixed_flow_all = {}
+            t_bar = 0
+            sol = {}  # Initial state
+            cost_k = 0  # Total cost for sample path k
+
+            # Rolling loop over time steps
+            while t_bar <= t_L:
+                print("t_bar=", t_bar)
+                s_t = eval(sample_path_row[t_bar])  # Converts '(-23.55, 0)' to (-23.55, 0)
+
+                # Generate the demand at t_bar only based on the realized current state of the hurricane
+                demand_processor.generate_current_demand(t_bar, s_t, network_processor, data, solution_method=4)
+
+                # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
+                # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
+                in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
+
+                # Identify which in-sample scenario matches the realized state s_t
+                s_realized = None
+                for s in range(self.num_sce):
+                    if tuple(in_sample_paths[s, t_bar]) == s_t:
+                        s_realized = s
+                        break
+
+                if s_realized is None:
+                    raise ValueError(f"No in-sample scenario matches realized state s_t = {s_t} at t_bar = {t_bar}")
+
+                # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
+                demand_processor.generate_future_demand(t_bar, s_t, t_L, network_processor, in_sample_paths, solution_method=4)  
+
+                demand_processor.generate_post_landfall_demand(t_L, in_sample_paths, network_processor, solution_method=4)
+
+                # Build the model for current roll (first sample path only)
+                if k == 0:
+                    model, I, U, S, f = self.RH_model_creator(t_bar, sol)
+                    model_dict[t_bar] = (model, I, U, S, f)
+
+                else:
+                    model, I, U, S, f = model_dict[t_bar]
+                    ### Update the new model info ###
+                    self.update_init_data(model, sol, t_bar)
+                    self.update_demand_data(model, demand_processor, t_bar)
+
+                # Solve the model
+                obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})
+                print(f"Objective value at time t_bar = {t_bar}: {obj_val}")
+
+                if obj_val is None:
+                    print(f"Skipping sample path {k} at t_bar={t_bar} due to infeasibility.")
+                    exit(0)              
+
+                cost_k += self.calculate_cost_rh(variable_values, t_bar, s_t)
+
+                # Accumulate fixed flows made at t_bar
+                for (i, j, r, t, s), val in variable_values["f"].items():
+                    if t == t_bar:
+                        self.fixed_flow_all[(i, j, r, t, s)] = val
+                
+                # Update the rolling state for next time step (should be before model creation, because we need updated sol to create the model every time)
+                sol = self.RH_sol_creator(variable_values, t_bar, s_realized)
+
+                # Advance to the next time step
+                t_bar += 1
+                
+            # Now solve the terminal deterministic model from t_L + 1 to T - 1
+            terminal_model, I_term, U_term, S_term, f_term = self.RH_terminal_model(sol, s_t, sample_paths)
+
+            obj_term, var_term = self.RH_model_solver(terminal_model, {"I": I_term, "U": U_term, "S": S_term, "f": f_term})
+            print(f"Objective value from terminal model (t ∈ [{t_L + 1}, {T - 1}]): {obj_term}")
+
+            if obj_term is not None:
+                cost_k += self.calculate_cost_terminal(var_term, t_L)
+            else:
+                print(f"Terminal stage for sample path {k} was infeasible.")
+                exit(0)   
+
+            # Save the cost for this sample path
+            total_costs[k] = cost_k
+
+        # Average cost across all sample paths
+        average_cost = np.mean(total_costs)
+
+        return average_cost, total_costs
+
+    def update_demand_data(self, model, demand_processor, t_bar):
+        """
+        Updates RHS for demand shortage update constraints at each t >= t_bar.
+        """
+        for (i, t, s), demand_val in demand_processor.d_its.items():
+            if t >= t_bar:
+                cname = f"DemandShortageUpdate_{i}_{t}_{s}"
+                if cname in model.getConstrsByName():
+                    model.getConstrByName(cname).setAttr("RHS", demand_val)
+
+        model.update()
+
+    def update_init_data(self, model, sol, t_bar):
+        """
+        Updates the reused model at time t_bar > 0 with the new sol dictionary.
+        This updates:
+        - Initial inventory constraints: I[i, r, t_bar] == sol["I"][i, r, t_bar]
+        - Initial unmet demand constraints: U[i, t_bar, s] == sol["U"][i, t_bar]
+        """
+        # Update initial inventory values
+        for (i, r, t), value in sol["I"].items():
+            if t == t_bar:
+                cname = f"InitInv_{i}_{r}_{t_bar}"
+                if cname in model.getConstrsByName():
+                    constr = model.getConstrByName(cname)
+                    constr.setAttr("RHS", value)
+
+        # Update initial unmet demand values
+        for (i, t), value in sol["U"].items():
+            if t == t_bar:
+                for s in range(self.num_sce):
+                    cname = f"InitUnmet_{i}_{s}_{t_bar}"
+                    if cname in model.getConstrsByName():
+                        constr = model.getConstrByName(cname)
+                        constr.setAttr("RHS", value)
+
+        model.update()
 
     def RH_evaluation_parallel(self, sample_paths_file, demand_processor, network_processor):
         """
