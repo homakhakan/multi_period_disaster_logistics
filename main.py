@@ -55,7 +55,6 @@ if __name__ == "__main__":
 
     thetaLB = float(params["THETA_LB"])
     eps = float(params["EPS"])
-    #test
     network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters()
@@ -234,7 +233,7 @@ if __name__ == "__main__":
         sample_paths_file = "Data/real_sample_paths_new.csv"
 
         start_time_rh = time.time()
-        avg_cost, total_costs = rh_model_instance.RH_evaluation_new(
+        avg_cost, total_costs = rh_model_instance.RH_evaluation(
             sample_paths=sample_paths_file,
             demand_processor=demand_processor,
             network_processor=network_processor

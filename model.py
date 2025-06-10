@@ -783,6 +783,7 @@ class TwoStageSPModel:
 
         Returns the average cost and the individual total costs for all sample paths.
         """
+        start_snapshot = tracemalloc.take_snapshot()
         from demand_generation import data, in_sample
 
         T = network_processor.T
