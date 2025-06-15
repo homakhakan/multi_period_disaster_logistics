@@ -233,7 +233,7 @@ if __name__ == "__main__":
         sample_paths_file = "Data/real_sample_paths_new.csv"
 
         start_time_rh = time.time()
-        avg_cost, total_costs = rh_model_instance.RH_evaluation(
+        avg_cost, total_costs = rh_model_instance.RH_evaluation_new(
             sample_paths=sample_paths_file,
             demand_processor=demand_processor,
             network_processor=network_processor

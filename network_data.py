@@ -54,8 +54,8 @@ class NetworkData:
             "location_file": f"Data/fullDist Set V Data Location-{self.instance_version} - Copy.xlsx",
             "county_file": f"Data/fullDist Set C Data-{self.instance_version}.xlsx",
             "resource_file": f"Data/fullDist R-{self.instance_version}.xlsx",
-            "time_matrix_file": f"Data/durationFull-{self.instance_version}.txt",
-            "distance_matrix_file": f"Data/distanceFull-{self.instance_version}.txt",
+            "time_matrix_file": f"Data/durationFull-{self.instance_version} - Copy.txt",
+            "distance_matrix_file": f"Data/distanceFull-{self.instance_version} - Copy.txt",
             "inputs_file": f"Data/fullDistInputs-{self.instance_version}.xlsx",
             "k_ijt_file": f"Data/K_ijt_data_fixed-{self.instance_version} - Copy.xlsx",
         }
