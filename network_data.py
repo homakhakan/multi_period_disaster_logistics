@@ -51,13 +51,13 @@ class NetworkData:
     def get_file_paths(self):
     
         self.file_paths = {
-            "location_file": f"Data/fullDist Set V Data Location-{self.instance_version} - Copy.xlsx",
+            "location_file": f"Data/fullDist Set V Data Location-{self.instance_version}.xlsx",
             "county_file": f"Data/fullDist Set C Data-{self.instance_version}.xlsx",
             "resource_file": f"Data/fullDist R-{self.instance_version}.xlsx",
-            "time_matrix_file": f"Data/durationFull-{self.instance_version} - Copy.txt",
-            "distance_matrix_file": f"Data/distanceFull-{self.instance_version} - Copy.txt",
+            "time_matrix_file": f"Data/durationFull-{self.instance_version}.txt",
+            "distance_matrix_file": f"Data/distanceFull-{self.instance_version}.txt",
             "inputs_file": f"Data/fullDistInputs-{self.instance_version}.xlsx",
-            "k_ijt_file": f"Data/K_ijt_data_fixed-{self.instance_version} - Copy.xlsx",
+            "k_ijt_file": f"Data/K_ijt_data_fixed-{self.instance_version}.xlsx",
         }
 
     def define_sets(self):
@@ -141,7 +141,7 @@ class NetworkData:
         # self.t_ijt = []
 
         # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
-        self.t_ijt = pd.read_csv("Data/t_ijt_matrix_randomized - Copy.csv").values.tolist()
+        self.t_ijt = pd.read_csv("Data/t_ijt_matrix_randomized.csv").values.tolist()
 
         #Starting number of trucks at location i (time period 0)
         self.C_i0 = self.df_V["TruckStart"].tolist()
