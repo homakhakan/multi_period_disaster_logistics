@@ -48,6 +48,11 @@ if __name__ == "__main__":
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = original (fixed arc capacity), 2 = with vehicle routing decisions")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
+
+    # New args
+    parser.add_argument("-si", "--start_index", type=int, default=0, help="Row index in the CSV where this job should start reading")
+    parser.add_argument("-np", "--num_paths",   type=int, default=100, help="How many sample-path rows to read (chunk size)")
+
     args = parser.parse_args()
 
     with open("fixed_params.yaml", "r") as f:
@@ -236,7 +241,9 @@ if __name__ == "__main__":
         avg_cost, total_costs = rh_model_instance.RH_evaluation(
             sample_paths=sample_paths_file,
             demand_processor=demand_processor,
-            network_processor=network_processor
+            network_processor=network_processor, 
+            start_index=args.start_index, # New
+            num_paths=args.num_paths # New
         )
         end_time_rh = time.time()
         total_time_rh = end_time_rh - start_time_rh

@@ -547,6 +547,10 @@ class DemandData:
                     demand_value = df.iloc[i, t]
                     self.d_its[(loc_id, time_step, scenario_idx)] = demand_value
 
+        #for (i, t, s), value in self.d_its.items():
+         #   if value != 0:
+          #      print(f"(i={i}, t={t}, s={s}) → demand = {value}")
+
         self.sce = list(range(self.num_sce))
         self.P = [1 / self.num_sce] * self.num_sce
 

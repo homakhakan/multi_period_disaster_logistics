@@ -772,7 +772,7 @@ class TwoStageSPModel:
 
         return penalty_cost + transport_cost
 
-    def RH_evaluation(self, sample_paths, demand_processor, network_processor):
+    def RH_evaluation(self, sample_paths, demand_processor, network_processor, start_index=0, num_paths=None):
         """
         Evaluates the rolling horizon model over multiple out-of-sample sample paths.
         For each sample path:
@@ -791,7 +791,7 @@ class TwoStageSPModel:
         V0 = self.network_processor.V0
         R = self.network_processor.R
         A = self.network_processor.A
-        nbOS = demand_processor.nbOS
+        #nbOS = demand_processor.nbOS
         t_L = network_processor.t_L
 
         start_time = time.time()
@@ -802,7 +802,17 @@ class TwoStageSPModel:
 
         # Load sample paths from CSV
         OS_paths_df = pd.read_csv(sample_paths)
-        OS_paths = OS_paths_df.values
+
+        # New 
+        # Compute slice limits
+        start_row = start_index
+        end_row   = None if num_paths is None else start_index + num_paths
+        # Grab the requested chunk
+        OS_paths = OS_paths_df.iloc[start_row : end_row].values
+        # Set nbOS to the number of paths actually loaded
+        nbOS = OS_paths.shape[0]
+        demand_processor.nbOS = nbOS          # keep downstream logic consistent
+        #OS_paths = OS_paths_df.values
         total_costs = np.zeros(nbOS)  # Total cost for each sample path
 
         for k in range(nbOS):
