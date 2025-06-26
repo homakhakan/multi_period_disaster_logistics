@@ -7,7 +7,6 @@ import time
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-### Extended
 class TwoStageSPModel:
     def __init__(self, network_processor, demand_processor, num_sce):
         self.network_processor = network_processor  # Store network data
