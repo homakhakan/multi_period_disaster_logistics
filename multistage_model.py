@@ -22,11 +22,21 @@ class MultiStageSPModel:
         self.m_ij = network_processor.m_ij
         self.T = network_processor.T
         self.T_Bef = network_processor.T_Bef
+        self.t_ijt = network_processor.t_ijt 
 
         # Builds models for each stage t before landfall
         self.stage = [self.stage_problem(t) for t in range(1, len(self.T_Bef) - 1)]
         # Append the last stochastic stage with theta removed
         self.stage.append(self.stage_problem(len(self.T_Bef) - 1, last_stage=True)) 
+
+        # Define delta indicator
+        self.delta = {}
+        for (i, j) in self.A:
+            for t in range(1, self.T):
+                t_prime = t - self.t_ijt[i][j] - 1
+                if 1 <= t_prime < t:             # valid stage
+                    self.delta[(i, j, t, t_prime)] = 1
+
 
     def stage_problem(self, t, last_stage=False):
     
@@ -144,12 +154,20 @@ class MultiStageSPModel:
             inv_constr = model_data["inventory_update_constr"]
 
             # Update RHS for each constraint directly
+            # Update RHS of demand shortage constraint
             for i, cons in demand_constr.items():
-                rhs = U_prev.get(i, 0.0) + "demand_realized[i]" ### Demand to be specified later 
+                rhs = U_prev.get(i, 0) + "demand_realized[i]" ### Demand to be specified later 
                 cons.setAttr(GRB.Attr.RHS, rhs)
 
+            # Update RHS of inventory balance constraint
             for (i, r), cons in inv_constr.items():
-                rhs = I_prev.get((i, r), 0.0)
+                arrivals = 0
+                for j in range(self.V):                      
+                    if (j, i) in self.A:                
+                        for t_prime in range(1, t):         
+                            if self.delta.get((j, i, t, t_prime), 0) == 1:
+                                arrivals += f_prev.get((j, i, r, t_prime), 0)
+                rhs = I_prev.get((i, r), 0) + arrivals
                 cons.setAttr(GRB.Attr.RHS, rhs)
 
             # Optimize the model
@@ -159,6 +177,9 @@ class MultiStageSPModel:
             # Check for the optimality and then extract the solution for updating state variables
             if model_data["model"].status != GRB.OPTIMAL:
                 raise RuntimeError("Something is wrong in the forward pass!")
+            else:
+                I_prev = {(i, r): model_data["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
+                U_prev = {i: model_data["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
             
 
 
