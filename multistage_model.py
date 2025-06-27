@@ -34,7 +34,7 @@ class MultiStageSPModel:
         for (i, j) in self.A:
             for t in range(1, self.T):
                 t_prime = t - self.t_ijt[i][j] - 1
-                if 1 <= t_prime < t:             # valid stage
+                if 1 <= t_prime < t:             
                     self.delta[(i, j, t, t_prime)] = 1
 
 
@@ -143,7 +143,7 @@ class MultiStageSPModel:
 
         # Initialize the state variables from t=0
         I_prev = {(i, r): I_ir0[i][r] for i in range(self.V) for r in range(self.R)}
-        U_prev = {i: 0.0 for i in range(self.V)}
+        U_prev = {i: 0 for i in range(self.V)}
         f_prev = {} # No past flows exist before t=1
 
         for t in range(1, len(self.T_Bef)):
@@ -180,6 +180,24 @@ class MultiStageSPModel:
             else:
                 I_prev = {(i, r): model_data["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
                 U_prev = {i: model_data["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
-            
+
+                # Extract the new in-transit flow for next stage
+                f_current = {}
+
+                # Carry forward earlier shipments t' < t that have NOT arrived
+                for (i, j) in self.A:
+                    for r in range(self.R):
+                        for t_prime in range(1, t):              # Only past departures
+                            if self.delta.get((i, j, t, t_prime), 0) == 0:
+                                # still travelling, keep it
+                                f_current[(i, j, r, t_prime)] = f_prev.get((i, j, r, t_prime), 0.0)
+                
+                # Add NEW shipments that depart at the current stage t
+                for (i, j, r), var in model_data["f"].items():  # local decision variable
+                    if var.X > 1e-6:
+                        f_current[(i, j, r, t)] = var.X
+    
+                # Save it to use as f_prev when we move to stage t+1
+                f_prev = f_current
 
 
