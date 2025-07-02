@@ -22,12 +22,8 @@ class MultiStageSPModel:
         self.m_ij = network_processor.m_ij
         self.T = network_processor.T
         self.T_Bef = network_processor.T_Bef
-        self.t_ijt = network_processor.t_ijt 
-
-        # Builds models for each stage t before landfall
-        self.stage = [self.stage_problem(t) for t in range(1, len(self.T_Bef) - 1)]
-        # Append the last stochastic stage with theta removed
-        self.stage.append(self.stage_problem(len(self.T_Bef) - 1, last_stage=True)) 
+        self.t_ijt = network_processor.t_ijt
+        self.t_L = network_processor.t_L 
 
         # Define delta indicator
         self.delta = {}
@@ -38,10 +34,17 @@ class MultiStageSPModel:
                     self.delta[(i, j, t, t_prime)] = 1
 
 
-    def stage_problem(self, t, last_stage=False):
+    def stage_t_state_k_problem(self, t, k, last_stage=False):
+        """
+        Build the optimization model for *one* node (t, k) in the scenario tree.
+
+        t : Stage index (time period).
+        k : Markov-chain state realised
+        last_stage : If True, we are at the deterministic multi-period terminal stage (θ removed).
+        """
     
         # Create a model for each stage t
-        m = gp.Model(f"Stage_{t}_model")
+        m = gp.Model(f"Stage_{t}_state_{k}_model")
         m.setParam("OutputFlag", 0)
         m.modelSense = GRB.MINIMIZE
 
@@ -55,6 +58,17 @@ class MultiStageSPModel:
         for i in range(self.V):
             U[i] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"U_{i}")
 
+        f1 = {}
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        for t_prime in range(1, t):
+                            f1[i, j, r, t_prime] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f1_{i}_{j}_{r}_{t_prime}")
+
+                        # NEW departure time  t′ = t   (needed for last constraint)
+                        f1[i, j, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f1_{i}_{j}_{r}_{t}")
+
         # Define local variables
         S = {}
         for i in range(self.V):
@@ -65,7 +79,7 @@ class MultiStageSPModel:
             for j in range(self.V):
                 if (i, j) in self.A:
                     for r in range(self.R):
-                        f[i, j, r] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="f_{i}_{j}_{r}")
+                        f[i, j, r] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}_{r}")
 
         # We need to define the last-stage problem separately since we do not have the theta variable there
         if not last_stage:
@@ -74,14 +88,10 @@ class MultiStageSPModel:
             theta = None
 
         # Constraints
-        constraints = []
-
         # Demand shortage update
         demand_shortage_constr = {}
         for i in range(self.V):
-            cons = m.addConstr(U[i] + S[i] == 0, name=f"DemandShortageUpdate_{i}")
-            demand_shortage_constr[i] = cons
-            constraints.append(cons)
+            demand_shortage_constr[i] = m.addConstr(U[i] + S[i] == 0, name=f"DemandShortageUpdate_{i}")
 
         # Inventory update
         inventory_update_constr = {}
@@ -95,9 +105,7 @@ class MultiStageSPModel:
                 else:                  
                     g_coeff = 0 # warehouse or RSA
 
-                cons = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == 0, name=f"InventoryUpdate_{i}_{r}")
-                inventory_update_constr[i, r] = cons
-                constraints.append(cons)
+                inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == 0, name=f"InventoryUpdate_{i}_{r}")
 
         # Flow capacity
         flow_capacity_constr = {}
@@ -105,9 +113,20 @@ class MultiStageSPModel:
             for j in range(self.V):
                 if (i, j) in self.A:
                     cap_ij_t = self.K_ijt[i][j][t]
-                    cons = m.addConstr(gp.quicksum(self.w_r[r] * f[i, j, r] for r in range(self.R)) <= cap_ij_t, name=f"FlowCapacity_{i}_{j}_{t}")
-                    flow_capacity_constr[i, j] = cons
-                    constraints.append(cons)
+                    flow_capacity_constr[i, j] = m.addConstr(gp.quicksum(self.w_r[r] * f[i, j, r] for r in range(self.R)) <= cap_ij_t, name=f"FlowCapacity_{i}_{j}_{t}")
+
+        # In-transit flow update to the next stage
+        in_transit_update_constr = {}
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        # t′ < t: Carry forward past flows (to be updated later)
+                        for t_prime in range(1, t):
+                            in_transit_update_constr[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] == 0, name=f"CarryTransit_{i}_{j}_{r}_{t_prime}_to_{t}")
+
+                        # t′ = t: Assign new flow to f1 for the next stage
+                        in_transit_update_constr[i, j, r, t] = m.addConstr(f1[i, j, r, t] == f[i, j, r], name=f"InTransitNew_{i}_{j}_{r}_{t}")
 
         # Objective
         objective = (
@@ -124,15 +143,29 @@ class MultiStageSPModel:
         "model": m,
         "I": I,                    # state variable: inventory
         "U": U,                    # state variable: unmet demand
-        "S": S,                    # local variable
+        "f1": f1,                  # state variable: in-transit flow
         "f": f,                    # local variable: flow
         "theta": theta,            # cost-to-go (None in last stage)
-        "constraints": constraints,
         "demand_shortage_constr": demand_shortage_constr,
         "inventory_update_constr": inventory_update_constr,
-        "flow_capacity_constr": flow_capacity_constr
+        "flow_capacity_constr": flow_capacity_constr,
+        "in_transit_update_constr": in_transit_update_constr
         }
     
+    def build_models(self):
+        """Build one model for every stochastic stage and one deterministic terminal model at the end."""
+
+        self.stage = {}
+
+        # Build stochastic single-period models  (1 … t_L-1)
+        for t in range(1, self.t_L):
+            for k in self.all_states:  # Should be defined later
+                self.stage[(t, k)] = self.stage_t_state_k_problem(t, k, last_stage=False)
+
+        # Build deterministic multi-period terminal stage at t = t_L, ..., T
+        #self.terminal_model = self.terminal_stage(self.t_L)
+
+
     def forward_pass(self):
 
         # Demand realization part
