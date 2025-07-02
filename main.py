@@ -33,7 +33,7 @@ os.chdir(os.path.dirname(__file__))
 # === My own project modules ===
 from demand_data import DemandData
 from network_data import NetworkData
-from model import TwoStageSPModel
+from twostage_model import TwoStageSPModel
 import output
 from output import save_full_oos_demand
 
