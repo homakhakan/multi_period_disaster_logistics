@@ -2,6 +2,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import pandas as pd
 import numpy as np
+import msp_helper
 
 class MultiStageSPModel:
     def __init__(self, network_processor, demand_processor):
@@ -153,17 +154,44 @@ class MultiStageSPModel:
         }
     
     def build_models(self):
-        """Build one model for every stochastic stage and one deterministic terminal model at the end."""
+        """ Define optimization models for each (t, k) using the transition JSON file and msp_helper tools."""
 
-        self.stage = {}
+        # Read the transition structure and derive the node lists
+        transition_dict = msp_helper.load_transition_dict("Data/pi_mssp_d_ST_track_15.json")
+        nodeLists = msp_helper.build_node_lists(transition_dict)
 
-        # Build stochastic single-period models  (1 … t_L-1)
-        for t in range(1, self.t_L):
-            for k in self.all_states:  # Should be defined later
-                self.stage[(t, k)] = self.stage_t_state_k_problem(t, k, last_stage=False)
+        # Prepare dictionaries
+        self.models = {}
+        self.I = {}
+        self.U = {}
+        self.f1 = {}
+        self.f = {}
+        self.S = {}
+        self.theta = {}
+        self.demand_shortage_constr = {}
+        self.inventory_update_constr = {}
+        self.flow_capacity_constr = {}
+        self.in_transit_update_constr = {}
 
-        # Build deterministic multi-period terminal stage at t = t_L, ..., T
-        #self.terminal_model = self.terminal_stage(self.t_L)
+        # Loop over pre-landfall stochastic stages (t = 1 … t_L)
+        for t in range(1, len(self.T_Bef)):
+            for k in nodeLists[t]: # Every reachable Markov state at time t
+                last_stage = (t == self.t_L) # True only at t = t_L
+
+                # Build the stage-state model and unpack everything we need
+                model_dict = self.stage_t_state_k_problem(t, k, last_stage=last_stage)
+
+                self.models[t, k] = model_dict["model"]
+                self.I[t, k] = model_dict["I"]
+                self.U[t, k] = model_dict["U"]
+                self.f1[t, k] = model_dict["f1"]
+                self.f[t, k] = model_dict["f"]
+                self.S[t, k] = model_dict["S"]
+                self.theta[t, k] = model_dict["theta"]
+                self.demand_shortage_constr[t, k] = model_dict["demand_shortage_constr"]
+                self.inventory_update_constr[t, k] = model_dict["inventory_update_constr"]
+                self.flow_capacity_constr[t, k] = model_dict["flow_capacity_constr"]
+                self.in_transit_update_constr[t, k] = model_dict["in_transit_update_constr"]
 
 
     def forward_pass(self):
