@@ -194,7 +194,6 @@ class MultiStageSPModel:
                 self.flow_capacity_constr[t, k] = model_dict["flow_capacity_constr"]
                 self.in_transit_update_constr[t, k] = model_dict["in_transit_update_constr"]
 
-
     def forward_pass(self):
 
         I_ir0 = self.network_processor.I_ir0
@@ -243,7 +242,7 @@ class MultiStageSPModel:
                 ## Alternative for updating f_prev
                 # f_prev = {key: var.X for key, var in model_dict["f1"].items() if var.X > 1e-8}
 
-        return state_path
+        return I_prev, U_prev, f_prev, state_path
 
     def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
         """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
@@ -275,7 +274,7 @@ class MultiStageSPModel:
                 rhs = 0
             cons.setAttr(GRB.Attr.RHS, rhs)
 
-    def backward_pass(self, state_path):
+    def backward_pass(self, I_prev, U_prev, f_prev, state_path):
 
         for t in range(len(state_path)-1, 0, -1):
             Q = {}  # Use dictionary to store: key = Markov state (tuple), value = objVal
@@ -286,6 +285,39 @@ class MultiStageSPModel:
             dual_transit   = {}  # (k,i,j,r,t′)    
 
             prev_state = state_path[t - 1]  # The state observed at time t-1
+
+            for k_state in self.nodeLists[t]:
+                self.mspFP_update_rhs(t, k_state, I_prev, U_prev, f_prev)
+                model = self.models[t, k_state]
+                model.optimize()
+
+                if model.status != gp.GRB.OPTIMAL:
+                    raise RuntimeError(f"Model at t={t}, state={k_state} not optimal in backward pass.")
+                    
+                else:
+                    Q[k_state] = model.ObjVal    # Save the objective value for this (t , k_state)
+
+                    # Extract dual values for each constraint set
+                    for i in range(self.V):
+                        dual_demand[k_state, i] = self.demand_shortage_constr[t, k_state][i].pi
+
+                    for i in range(self.V):
+                        for r in range(self.R):
+                            dual_inventory[k_state, i, r] = self.inventory_update_constr[t, k_state][i, r].pi
+
+                    for i in range(self.V):
+                        for j in range(self.V):
+                            if (i, j) in self.A:
+                                dual_capacity[k_state, i, j] = self.flow_capacity_constr[t, k_state][i, j].pi
+
+                    for i in range(self.V):
+                        for j in range(self.V):
+                            if (i, j) in self.A:
+                                for r in range(self.R):
+                                    for t_prime in range(1, t + 1):  # include t itself since f1[i,j,r,t] exists
+                                        dual_transit[k_state, i, j, r, t_prime] = self.in_transit_update_constr[t, k_state][i, j, r, t_prime].pi
+
+
             
 
 
