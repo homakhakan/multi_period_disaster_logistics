@@ -34,6 +34,11 @@ class MultiStageSPModel:
                 if 1 <= t_prime < t:             
                     self.delta[(i, j, t, t_prime)] = 1
 
+        # Markov chain data
+        transition_path = "Data/pi_mssp_d_ST_track_15.json"
+        self.transition_dict = msp_helper.load_transition_dict(transition_path)
+        self.nodeLists = msp_helper.build_node_lists(self.transition_dict)
+
 
     def stage_t_state_k_problem(self, t, k, last_stage=False):
         """
@@ -156,10 +161,6 @@ class MultiStageSPModel:
     def build_models(self):
         """ Define optimization models for each (t, k) using the transition JSON file and msp_helper tools."""
 
-        # Read the transition structure and derive the node lists
-        transition_dict = msp_helper.load_transition_dict("Data/pi_mssp_d_ST_track_15.json")
-        nodeLists = msp_helper.build_node_lists(transition_dict)
-
         # Prepare dictionaries
         self.models = {}
         self.I = {}
@@ -175,7 +176,7 @@ class MultiStageSPModel:
 
         # Loop over pre-landfall stochastic stages (t = 1 … t_L)
         for t in range(1, len(self.T_Bef)):
-            for k in nodeLists[t]: # Every reachable Markov state at time t
+            for k in self.nodeLists[t]: # Every reachable Markov state at time t
                 last_stage = (t == self.t_L) # True only at t = t_L
 
                 # Build the stage-state model and unpack everything we need
@@ -274,5 +275,17 @@ class MultiStageSPModel:
                 rhs = 0
             cons.setAttr(GRB.Attr.RHS, rhs)
 
+    def backward_pass(self, state_path):
+
+        for t in range(len(state_path)-1, 0, -1):
+            Q = {}  # Use dictionary to store: key = Markov state (tuple), value = objVal
+            # List for all the dual multipliers of the constraints
+            dual_demand    = {}  # (k,i)              
+            dual_inventory = {}  # (k,i,r)            
+            dual_capacity  = {}  # (k,i,j)            
+            dual_transit   = {}  # (k,i,j,r,t′)    
+
+            prev_state = state_path[t - 1]  # The state observed at time t-1
+            
 
 
