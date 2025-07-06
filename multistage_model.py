@@ -196,10 +196,6 @@ class MultiStageSPModel:
 
     def forward_pass(self):
 
-        # Demand realization part
-
-
-
         I_ir0 = self.network_processor.I_ir0
         k_t = self.nodeLists[0][0]      # First state at t=0
         state_path = [k_t]              # Keep track of visited states
@@ -236,17 +232,23 @@ class MultiStageSPModel:
                                 f_current[(i, j, r, t_prime)] = f_prev.get((i, j, r, t_prime), 0.0)
                 
                 # Add NEW shipments that depart at the current stage t
-                for (i, j, r), var in model_data["f"].items():  # local decision variable
+                for (i, j, r), var in model_dict["f"].items():  # local decision variable
                     if var.X > 1e-6:
                         f_current[(i, j, r, t)] = var.X
     
                 # Save it to use as f_prev when we move to stage t+1
                 f_prev = f_current
 
-    def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
-        """Update right-hand sides of the (t , k_t) model before optimization.""" 
+                ## Alternative for updating f_prev
+                # f_prev = {key: var.X for key, var in model_dict["f1"].items() if var.X > 1e-8}
 
-        demand_real = self.demand_mapping(t, k_t) ### Be determined soon
+        return state_path
+
+    def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
+        """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
+
+        # Realized demand at stage t, given Markov state k_t
+        demand_real = self.demand_processor.msp_demand_mapping(t, k_t)
     
         # Demand shortage rhs
         for i, cons in self.demand_shortage_constr[t, k_t].items():

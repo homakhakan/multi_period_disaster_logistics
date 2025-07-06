@@ -567,6 +567,28 @@ class DemandData:
 
         self.d_its_expected = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
 
-    
+    def msp_demand_mapping(self, t, k_t):
+        """Return a dict {i: demand_i(t)} based on realised state k_t."""
+
+        from demand_generation import demand_deterministic_landfall, data
+
+        track_err, intensity = k_t
+
+        # PoD-level demand (existing helper)
+        demand_vector = demand_deterministic_landfall(data, track_err, int(intensity), t)
+        scaled_pod = self.population * np.array(demand_vector)
+
+        # Map PoD demand to shelters with inverse-distance weights
+        demand_df = pd.DataFrame({t: scaled_pod})
+        shelter_demands = (self.weights.multiply(demand_df[t], axis=0).sum(axis=0).values)
+
+        # Build node-level dict
+        demand_i = {}
+        for idx, i in enumerate(self.V1):   # shelters
+            demand_i[i] = shelter_demands[idx]
+        for i in range(self.V):             # non-shelters
+            if i not in self.V1:
+                demand_i[i] = 0.0
+        return demand_i
 
 
