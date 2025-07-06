@@ -201,6 +201,8 @@ class MultiStageSPModel:
 
 
         I_ir0 = self.network_processor.I_ir0
+        k_t = self.nodeLists[0][0]      # First state at t=0
+        state_path = [k_t]              # Keep track of visited states
 
         # Initialize the state variables from t=0
         I_prev = {(i, r): I_ir0[i][r] for i in range(self.V) for r in range(self.R)}
@@ -208,39 +210,19 @@ class MultiStageSPModel:
         f_prev = {} # No past flows exist before t=1
 
         for t in range(1, len(self.T_Bef)):
-            model_data = self.stage[t - 1] # Subtract 1 since self.stage[0] corresponds to time step t = 1 (not t = 0)
-
-            # Retrieve specific constraints for RHS updates
-            demand_constr = model_data["demand_shortage_constr"]
-            inv_constr = model_data["inventory_update_constr"]
-
-            # Update RHS for each constraint directly
-            # Update RHS of demand shortage constraint
-            for i, cons in demand_constr.items():
-                rhs = U_prev.get(i, 0) + "demand_realized[i]" ### Demand to be specified later 
-                cons.setAttr(GRB.Attr.RHS, rhs)
-
-            # Update RHS of inventory balance constraint
-            for (i, r), cons in inv_constr.items():
-                arrivals = 0
-                for j in range(self.V):                      
-                    if (j, i) in self.A:                
-                        for t_prime in range(1, t):         
-                            if self.delta.get((j, i, t, t_prime), 0) == 1:
-                                arrivals += f_prev.get((j, i, r, t_prime), 0)
-                rhs = I_prev.get((i, r), 0) + arrivals
-                cons.setAttr(GRB.Attr.RHS, rhs)
-
-            # Optimize the model
-            model_data["model"].update()
-            model_data["model"].optimize()
+            k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
+            state_path.append(k_t)          # Keep sample path history
+            self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
+            model_dict = self.models[t, k_t]
+            model = model_dict["model"]
+            model.optimize() # Optimize the model
 
             # Check for the optimality and then extract the solution for updating state variables
-            if model_data["model"].status != GRB.OPTIMAL:
-                raise RuntimeError("Something is wrong in the forward pass!")
+            if model.status != gp.GRB.OPTIMAL:
+                raise RuntimeError(f"Model at t={t}, state={k_t} not optimal")
             else:
-                I_prev = {(i, r): model_data["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
-                U_prev = {i: model_data["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
+                I_prev = {(i, r): model_dict["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
+                U_prev = {i: model_dict["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
 
                 # Extract the new in-transit flow for next stage
                 f_current = {}
@@ -260,5 +242,35 @@ class MultiStageSPModel:
     
                 # Save it to use as f_prev when we move to stage t+1
                 f_prev = f_current
+
+    def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
+        """Update right-hand sides of the (t , k_t) model before optimization.""" 
+
+        demand_real = self.demand_mapping(t, k_t) ### Be determined soon
+    
+        # Demand shortage rhs
+        for i, cons in self.demand_shortage_constr[t, k_t].items():
+            rhs = U_prev.get(i, 0) + demand_real.get(i, 0)
+            cons.setAttr(GRB.Attr.RHS, rhs)
+
+        # Inventory flow-balance rhs
+        for (i, r), cons in self.inventory_update_constr[t, k_t].items():
+            arrivals = 0
+            for j in range(self.V):
+                if (j, i) in self.A:
+                    for t_prime in range(1, t):
+                        if self.delta.get((j, i, t, t_prime), 0) == 1:
+                            arrivals += f_prev.get((j, i, r, t_prime), 0)
+            rhs = I_prev.get((i, r), 0) + arrivals
+            cons.setAttr(GRB.Attr.RHS, rhs)
+        
+        # In-transit flow rhs
+        for (i, j, r, t_prime), cons in self.in_transit_update_constr[t, k_t].items():
+            if self.delta.get((i, j, t, t_prime), 0) == 0:
+                rhs = f_prev.get((i, j, r, t_prime), 0)
+            else:
+                rhs = 0
+            cons.setAttr(GRB.Attr.RHS, rhs)
+
 
 
