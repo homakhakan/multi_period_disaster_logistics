@@ -568,7 +568,7 @@ class DemandData:
         self.d_its_expected = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
 
     def msp_demand_mapping(self, t, k_t):
-        """Return a dict {i: demand_i(t)} based on realised state k_t."""
+        """Return a dict {i: demand_i(t)} based on realized state k_t."""
 
         from demand_generation import demand_deterministic_landfall, data
 
