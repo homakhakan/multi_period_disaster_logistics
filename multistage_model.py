@@ -3,6 +3,7 @@ from gurobipy import GRB
 import pandas as pd
 import numpy as np
 import msp_helper
+import time
 
 class MultiStageSPModel:
     def __init__(self, network_processor, demand_processor, params):
@@ -10,6 +11,7 @@ class MultiStageSPModel:
         self.demand_processor = demand_processor
         self.params = params
         self.smallest_trans_prob = float(params["smallest_trans_prob"])
+        self.cutviol = float(params["CUTVIOL"])
 
         self.V = network_processor.V
         self.V1 = network_processor.V1
@@ -208,6 +210,8 @@ class MultiStageSPModel:
         U_prev = {i: 0 for i in range(self.V)}
         f_prev = {} # No past flows exist before t=1
 
+        lb = 1e10
+
         for t in range(1, len(self.T_Bef)):
             k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
             state_path.append(k_t)          # Keep sample path history
@@ -220,6 +224,8 @@ class MultiStageSPModel:
             if model.status != gp.GRB.OPTIMAL:
                 raise RuntimeError(f"Model at t={t}, state={k_t} not optimal")
             else:
+                if t == 1:
+                    lb = model.objVal
                 thetaval[t] = self.theta[t, k_t].x
                 I_prev = {(i, r): model_dict["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
                 U_prev = {i: model_dict["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
@@ -246,7 +252,7 @@ class MultiStageSPModel:
                 ## Alternative for updating f_prev
                 # f_prev = {key: var.X for key, var in model_dict["f1"].items() if var.X > 1e-8}
 
-        return I_prev, U_prev, f_prev, thetaval, state_path
+        return I_prev, U_prev, f_prev, thetaval, lb, state_path
 
     def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
         """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
@@ -279,6 +285,8 @@ class MultiStageSPModel:
             cons.setAttr(GRB.Attr.RHS, rhs)
 
     def backward_pass(self, I_prev, U_prev, f_prev, thetaval, state_path):
+        
+        cutviolFlag = False
 
         for t in range(len(state_path)-1, 0, -1):
             Q = {}  # Use dictionary to store: key = Markov state (tuple), value = objVal
@@ -328,6 +336,57 @@ class MultiStageSPModel:
                     # Accumulate expected cost-to-go from all reachable next-stage states with non-negligible transition probability
                     if self.transition_dict[n][k_state] > self.smallest_trans_prob:
                         Qvalue += Q[k_state] * self.transition_dict[n][k_state] 
+
+                # Check if cut is violated at the sample path encountered in the forward pass (Only interested in checking cut violation on the same node as the forward pass)
+                # n  : current state at stage t-1
+                # prev_state : state that was actually visited in the forward pass
+                if n == prev_state and (
+                    (Qvalue - thetaval[t - 1]) / max(1e-10, abs(thetaval[t - 1])) > self.cutviol 
+                    and abs(Qvalue - thetaval[t - 1]) > self.cutviol):
+                    cutviolFlag = True
+
+                for k_state in self.nodeLists[t]:
+                    if self.transition_dict[n][k_state] > self.smallest_trans_prob:
+                        tempval == 
+
+
+        return cutviolFlag
+
+    # Train model
+    def solve_sddp(self):
+
+        # Initialization
+        train_time = 0
+        relative_gap = 1e10
+        lb = 0
+        LB = []          # lower-bound history 
+        iter = 0
+        cutviol_iter = 0
+        start = time.time()
+
+        while True:
+            iter += 1
+
+            # Forward pass
+            I_prev, U_prev, f_prev, theta_val, lb, state_path = self.forward_pass()
+            LB.append(lb)
+
+            # --------------------------------------------------------------
+            # Termination check ### Determined later
+            # --------------------------------------------------------------
+            
+            # Backward pass (if not terminated)
+            cut_violFalg = self.backward_pass(I_prev, U_prev, f_prev, theta_val, state_path)
+
+            # cut-violation bookkeeping (for stall termination test, etc.)
+            if cut_violFalg:
+                cutviol_iter = 0
+            else:
+                cutviol_iter += 1
+
+        return LB, train_time, iter
+    
+        
  
 
 

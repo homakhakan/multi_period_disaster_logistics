@@ -30,3 +30,4 @@ EPS: 1e-5
 
 # Multi-Stage
 smallest_trans_prob: 0.0005
+CUTVIOL: 0.0001
