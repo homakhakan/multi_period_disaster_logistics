@@ -314,8 +314,16 @@ class MultiStageSPModel:
                         for j in range(self.V):
                             if (i, j) in self.A:
                                 for r in range(self.R):
-                                    for t_prime in range(1, t + 1):  # include t itself since f1[i,j,r,t] exists
+                                    for t_prime in range(1, t):
                                         dual_transit[k_state, i, j, r, t_prime] = self.in_transit_update_constr[t, k_state][i, j, r, t_prime].pi
+
+            # Solving all stage-(t-1) problems and generate cuts/valid inequalities
+            for n in self.nodeLists[t - 1]:
+                Qvalue = 0
+                for k_state in self.nodeLists[t]:
+                    if 
+
+
 
 
             
