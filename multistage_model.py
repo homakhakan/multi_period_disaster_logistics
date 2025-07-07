@@ -345,10 +345,39 @@ class MultiStageSPModel:
                     and abs(Qvalue - thetaval[t - 1]) > self.cutviol):
                     cutviolFlag = True
 
+                # Initialize coeff-dictionaries for each state variable
+                cut_I = {(i, r): 0.0 for i in range(self.V) for r in range(self.R)}
+                cut_U = {i: 0.0            for i in range(self.V)}
+                cut_f1 = {}               
+                cut_rhs = 0.0   
+
                 for k_state in self.nodeLists[t]:
                     if self.transition_dict[n][k_state] > self.smallest_trans_prob:
-                        tempval == 
 
+                        # Demand-shortage constraints
+                        for i in range(self.V):
+                            lam = dual_demand[k_state, i] * self.transition_dict[n][k_state]
+                            cut_U[i] += lam                                                     # Coefficient
+                            cut_rhs += lam * U_prev[i]                                          # RHS
+
+                        # Inventory-balance constraints
+                        for i in range(self.V):
+                            for r in range(self.R):
+                                lam = dual_inventory[k_state, i, r] * self.transition_dict[n][k_state]
+                                cut_I[i, r] += lam                                              # Coefficient
+                                cut_rhs += lam * I_prev[i, r]                                   # RHS
+
+                        # Flow capacity constraints
+                        for i in range(self.V):
+                            for j in range(self.V):
+                                if (i, j) in self.A:
+                                    lam = dual_capacity[k_state, i, j] * self.transition_dict[n][k_state]
+                                    # Coefficient multiplies fixed parameter K_ijt, so only RHS:
+                                    cut_rhs += lam * self.K_ijt[i][j][t-1]
+
+
+                # Add the cut
+                self.models[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}_{iter}")
 
         return cutviolFlag
 
