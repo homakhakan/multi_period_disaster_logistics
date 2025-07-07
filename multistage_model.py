@@ -375,6 +375,10 @@ class MultiStageSPModel:
                                     # Coefficient multiplies fixed parameter K_ijt, so only RHS:
                                     cut_rhs += lam * self.K_ijt[i][j][t-1]
 
+                # Build the left-hand-side linear expression
+                lhs_expr  = self.theta[t-1, n]
+                lhs_expr += -gp.quicksum(cut_U[i] * self.U[t-1, n][i] for i in self.V)
+                lhs_expr += -gp.quicksum(cut_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
 
                 # Add the cut
                 self.models[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}_{iter}")
