@@ -5,9 +5,11 @@ import numpy as np
 import msp_helper
 
 class MultiStageSPModel:
-    def __init__(self, network_processor, demand_processor):
+    def __init__(self, network_processor, demand_processor, params):
         self.network_processor = network_processor
         self.demand_processor = demand_processor
+        self.params = params
+        self.smallest_trans_prob = float(params["smallest_trans_prob"])
 
         self.V = network_processor.V
         self.V1 = network_processor.V1
@@ -89,7 +91,7 @@ class MultiStageSPModel:
 
         # We need to define the last-stage problem separately since we do not have the theta variable there
         if not last_stage:
-            theta = m.addVar(name="theta")
+            theta = m.addVar(lb=0, name="theta")
         else:
             theta = None
 
@@ -140,7 +142,7 @@ class MultiStageSPModel:
             + gp.quicksum(
                 gp.quicksum(self.cost_ir[i][r] * f[i, j, r] for i in self.V0 for j in range(self.V) if (i, j) in self.A)
                 + gp.quicksum(self.m_ij[i][j] * f[i, j, r] for i in range(self.V) for j in range(self.V) if (i, j) in self.A) for r in range(self.R))
-            + (theta if not last_stage else 0)
+            + theta
         )
 
         m.setObjective(objective, GRB.MINIMIZE)
@@ -199,6 +201,7 @@ class MultiStageSPModel:
         I_ir0 = self.network_processor.I_ir0
         k_t = self.nodeLists[0][0]      # First state at t=0
         state_path = [k_t]              # Keep track of visited states
+        thetaval = [0] * self.T_Bef     # Stores theta values (cost-to-go)
 
         # Initialize the state variables from t=0
         I_prev = {(i, r): I_ir0[i][r] for i in range(self.V) for r in range(self.R)}
@@ -217,6 +220,7 @@ class MultiStageSPModel:
             if model.status != gp.GRB.OPTIMAL:
                 raise RuntimeError(f"Model at t={t}, state={k_t} not optimal")
             else:
+                thetaval[t] = self.theta[t, k_t].x
                 I_prev = {(i, r): model_dict["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
                 U_prev = {i: model_dict["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
 
@@ -242,7 +246,7 @@ class MultiStageSPModel:
                 ## Alternative for updating f_prev
                 # f_prev = {key: var.X for key, var in model_dict["f1"].items() if var.X > 1e-8}
 
-        return I_prev, U_prev, f_prev, state_path
+        return I_prev, U_prev, f_prev, thetaval, state_path
 
     def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
         """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
@@ -274,7 +278,7 @@ class MultiStageSPModel:
                 rhs = 0
             cons.setAttr(GRB.Attr.RHS, rhs)
 
-    def backward_pass(self, I_prev, U_prev, f_prev, state_path):
+    def backward_pass(self, I_prev, U_prev, f_prev, thetaval, state_path):
 
         for t in range(len(state_path)-1, 0, -1):
             Q = {}  # Use dictionary to store: key = Markov state (tuple), value = objVal
@@ -321,7 +325,10 @@ class MultiStageSPModel:
             for n in self.nodeLists[t - 1]:
                 Qvalue = 0
                 for k_state in self.nodeLists[t]:
-                    if 
+                    # Accumulate expected cost-to-go from all reachable next-stage states with non-negligible transition probability
+                    if self.transition_dict[n][k_state] > self.smallest_trans_prob:
+                        Qvalue += Q[k_state] * self.transition_dict[n][k_state] 
+ 
 
 
 
