@@ -1,6 +1,7 @@
 import json
 import numpy as np
 import pandas as pd
+import time
 
 def load_transition_dict(path):
     with open(path, "r") as f:
@@ -27,3 +28,27 @@ def MC_sample(t, current_state, transition_dict):
     idx    = np.random.choice(len(states), p=weights)
     return states[idx]
 
+def termination_check(iter, relative_gap, LB, start, cutviol_iter, params):
+    flag = 0
+    Elapsed = time.time() - start
+    
+    if iter > params.max_iter:
+        flag = 1
+        print("max iteration is reached")
+
+    elif Elapsed > params.time_limit:
+        flag = 2
+        print("time limit is reached")
+
+    elif cutviol_iter > params.cutviol_maxiter:
+        flag = 3
+        print("cut violation is reached")
+
+    else:
+        if iter > params.stall:
+            relative_gap = (LB[iter-1]-LB[iter-1-params.stall])/max(1e-10,abs(LB[iter-1-params.stall]))
+            if relative_gap < params.cutviol:
+                flag = 4
+                print("the LB is not making significant progress")
+
+    return flag, Elapsed

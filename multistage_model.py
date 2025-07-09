@@ -12,6 +12,10 @@ class MultiStageSPModel:
         self.params = params
         self.smallest_trans_prob = float(params["smallest_trans_prob"])
         self.cutviol = float(params["CUTVIOL"])
+        self.max_iter = int(params["MAX_ITER"])
+        self.stall = int(params["STALL"])
+        self.cutviol_maxiter = int(params["CUTVIOL_MAXITER"])
+        self.time_limit = float(params["TIME_LIMIT"])
 
         self.V = network_processor.V
         self.V1 = network_processor.V1
@@ -212,8 +216,9 @@ class MultiStageSPModel:
 
         lb = 1e10
 
-        for t in range(1, len(self.T_Bef)):
-            k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
+        for t in range(len(self.T_Bef)):
+            if t > 0:
+                k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
             state_path.append(k_t)          # Keep sample path history
             self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
             model_dict = self.models[t, k_t]
@@ -224,7 +229,7 @@ class MultiStageSPModel:
             if model.status != gp.GRB.OPTIMAL:
                 raise RuntimeError(f"Model at t={t}, state={k_t} not optimal")
             else:
-                if t == 1:
+                if t == 0:
                     lb = model.objVal
                 thetaval[t] = self.theta[t, k_t].x
                 I_prev = {(i, r): model_dict["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
@@ -404,9 +409,11 @@ class MultiStageSPModel:
             I_prev, U_prev, f_prev, theta_val, lb, state_path = self.forward_pass()
             LB.append(lb)
 
-            # --------------------------------------------------------------
-            # Termination check ### Determined later
-            # --------------------------------------------------------------
+            # Termination check
+            flag, Elapsed = msp_helper.termination_check(iter, relative_gap, LB, start, cutviol_iter, self.solveParams)
+            if flag != 0:
+                train_time = Elapsed
+                break
             
             # Backward pass (if not terminated)
             cut_violFalg = self.backward_pass(I_prev, U_prev, f_prev, theta_val, state_path)
