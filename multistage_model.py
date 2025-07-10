@@ -16,6 +16,8 @@ class MultiStageSPModel:
         self.stall = int(params["STALL"])
         self.cutviol_maxiter = int(params["CUTVIOL_MAXITER"])
         self.time_limit = float(params["TIME_LIMIT"])
+        self.lower_bound = float(params["LOWER_BOUND"])
+        self.rel_gap = float(params["relative_gap"])
 
         self.V = network_processor.V
         self.V1 = network_processor.V1
@@ -35,12 +37,12 @@ class MultiStageSPModel:
         self.t_L = network_processor.t_L 
 
         # Define delta indicator
-        self.delta = {}
+        self.delta = []
         for (i, j) in self.A:
-            for t in range(1, self.T):
+            for t in range(self.T):
                 t_prime = t - self.t_ijt[i][j] - 1
-                if 1 <= t_prime < t:             
-                    self.delta[(i, j, t, t_prime)] = 1
+                if 0 <= t_prime < t:             
+                    self.delta.append((i, j, t, t_prime))
 
         # Markov chain data
         transition_path = "Data/pi_mssp_d_ST_track_15.json"
@@ -77,7 +79,7 @@ class MultiStageSPModel:
             for j in range(self.V):
                 if (i, j) in self.A:
                     for r in range(self.R):
-                        for t_prime in range(1, t):
+                        for t_prime in range(0, t):
                             f1[i, j, r, t_prime] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f1_{i}_{j}_{r}_{t_prime}")
 
                         # NEW departure time  t′ = t   (needed for last constraint)
@@ -119,7 +121,11 @@ class MultiStageSPModel:
                 else:                  
                     g_coeff = 0 # warehouse or RSA
 
-                inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == 0, name=f"InventoryUpdate_{i}_{r}")
+                # Adjust RHS based on t
+                if t == 0:
+                    inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == self.network_processor.I_ir0[(i, r)], name=f"InventoryUpdate_{i}_{r}_t0")
+                else:
+                    inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == 0, name=f"InventoryUpdate_{i}_{r}_t{t}") 
 
         # Flow capacity
         flow_capacity_constr = {}
@@ -136,7 +142,7 @@ class MultiStageSPModel:
                 if (i, j) in self.A:
                     for r in range(self.R):
                         # t′ < t: Carry forward past flows (to be updated later)
-                        for t_prime in range(1, t):
+                        for t_prime in range(0, t):
                             in_transit_update_constr[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] == 0, name=f"CarryTransit_{i}_{j}_{r}_{t_prime}_to_{t}")
 
                         # t′ = t: Assign new flow to f1 for the next stage
@@ -183,7 +189,7 @@ class MultiStageSPModel:
         self.in_transit_update_constr = {}
 
         # Loop over pre-landfall stochastic stages (t = 1 … t_L)
-        for t in range(1, len(self.T_Bef)):
+        for t in range(len(self.T_Bef)):
             for k in self.nodeLists[t]: # Every reachable Markov state at time t
                 last_stage = (t == self.t_L) # True only at t = t_L
 
@@ -204,23 +210,22 @@ class MultiStageSPModel:
 
     def forward_pass(self):
 
-        I_ir0 = self.network_processor.I_ir0
         k_t = self.nodeLists[0][0]      # First state at t=0
         state_path = [k_t]              # Keep track of visited states
         thetaval = [0] * self.T_Bef     # Stores theta values (cost-to-go)
 
         # Initialize the state variables from t=0
-        I_prev = {(i, r): I_ir0[i][r] for i in range(self.V) for r in range(self.R)}
+        I_prev = {(i, r): 0 for i in range(self.V) for r in range(self.R)}
         U_prev = {i: 0 for i in range(self.V)}
         f_prev = {} # No past flows exist before t=1
 
-        lb = 1e10
+        lb = self.lower_bound
 
         for t in range(len(self.T_Bef)):
             if t > 0:
                 k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
-            state_path.append(k_t)          # Keep sample path history
-            self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
+                state_path.append(k_t)          # Keep sample path history
+                self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
             model_dict = self.models[t, k_t]
             model = model_dict["model"]
             model.optimize() # Optimize the model
@@ -229,33 +234,28 @@ class MultiStageSPModel:
             if model.status != gp.GRB.OPTIMAL:
                 raise RuntimeError(f"Model at t={t}, state={k_t} not optimal")
             else:
-                if t == 0:
-                    lb = model.objVal
-                thetaval[t] = self.theta[t, k_t].x
                 I_prev = {(i, r): model_dict["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
                 U_prev = {i: model_dict["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
 
                 # Extract the new in-transit flow for next stage
                 f_current = {}
-
                 # Carry forward earlier shipments t' < t that have NOT arrived
                 for (i, j) in self.A:
                     for r in range(self.R):
-                        for t_prime in range(1, t):              # Only past departures
-                            if self.delta.get((i, j, t, t_prime), 0) == 0:
-                                # still travelling, keep it
-                                f_current[(i, j, r, t_prime)] = f_prev.get((i, j, r, t_prime), 0.0)
-                
+                        for t_prime in range(0, t):              # Only past departures
+                            if (i, j, t, t_prime) not in self.delta:
+                                f_current[(i, j, r, t_prime)] = f_prev.get((i, j, r, t_prime), 0.0)   # still travelling, keep it     
                 # Add NEW shipments that depart at the current stage t
                 for (i, j, r), var in model_dict["f"].items():  # local decision variable
                     if var.X > 1e-6:
-                        f_current[(i, j, r, t)] = var.X
-    
+                        f_current[(i, j, r, t)] = var.X    
                 # Save it to use as f_prev when we move to stage t+1
                 f_prev = f_current
 
-                ## Alternative for updating f_prev
-                # f_prev = {key: var.X for key, var in model_dict["f1"].items() if var.X > 1e-8}
+                thetaval[t] = self.theta[t, k_t].x
+
+                if t == 0:
+                    lb = model.objVal               
 
         return I_prev, U_prev, f_prev, thetaval, lb, state_path
 
@@ -275,15 +275,15 @@ class MultiStageSPModel:
             arrivals = 0
             for j in range(self.V):
                 if (j, i) in self.A:
-                    for t_prime in range(1, t):
-                        if self.delta.get((j, i, t, t_prime), 0) == 1:
+                    for t_prime in range(0, t):
+                        if (j, i, t, t_prime) in self.delta:
                             arrivals += f_prev.get((j, i, r, t_prime), 0)
             rhs = I_prev.get((i, r), 0) + arrivals
             cons.setAttr(GRB.Attr.RHS, rhs)
         
         # In-transit flow rhs
         for (i, j, r, t_prime), cons in self.in_transit_update_constr[t, k_t].items():
-            if self.delta.get((i, j, t, t_prime), 0) == 0:
+            if (i, j, t, t_prime) not in self.delta:
                 rhs = f_prev.get((i, j, r, t_prime), 0)
             else:
                 rhs = 0
@@ -301,7 +301,7 @@ class MultiStageSPModel:
             dual_capacity  = {}  # (k,i,j)            
             dual_transit   = {}  # (k,i,j,r,t′)    
 
-            prev_state = state_path[t - 1]  # The state observed at time t-1
+            sample_state = state_path[t - 1]  # The state observed at time t-1
 
             for k_state in self.nodeLists[t]:
                 self.mspFP_update_rhs(t, k_state, I_prev, U_prev, f_prev)
@@ -331,7 +331,7 @@ class MultiStageSPModel:
                         for j in range(self.V):
                             if (i, j) in self.A:
                                 for r in range(self.R):
-                                    for t_prime in range(1, t):
+                                    for t_prime in range(0, t):
                                         dual_transit[k_state, i, j, r, t_prime] = self.in_transit_update_constr[t, k_state][i, j, r, t_prime].pi
 
             # Solving all stage-(t-1) problems and generate cuts/valid inequalities
@@ -344,8 +344,8 @@ class MultiStageSPModel:
 
                 # Check if cut is violated at the sample path encountered in the forward pass (Only interested in checking cut violation on the same node as the forward pass)
                 # n  : current state at stage t-1
-                # prev_state : state that was actually visited in the forward pass
-                if n == prev_state and (
+                # sample_state : state that was actually visited in the forward pass
+                if n == sample_state and (
                     (Qvalue - thetaval[t - 1]) / max(1e-10, abs(thetaval[t - 1])) > self.cutviol 
                     and abs(Qvalue - thetaval[t - 1]) > self.cutviol):
                     cutviolFlag = True
@@ -393,11 +393,20 @@ class MultiStageSPModel:
     # Train model
     def solve_sddp(self):
 
+        I_ir0 = self.network_processor.I_ir0
+        k_init = self.nodeLists[0][0]
+
+        # Set the RHS of the first_stage problem
+        for i in range(self.V):
+            for r in range(self.R):
+                self.inventory_update_constr[0, k_init][i, r].setAttr(GRB.Attr.RHS, I_ir0[i][r])
+
         # Initialization
         train_time = 0
-        relative_gap = 1e10
+        relative_gap = self.rel_gap
         lb = 0
         LB = []          # lower-bound history 
+        thetaval = [0] * self.T_Bef
         iter = 0
         cutviol_iter = 0
         start = time.time()
@@ -406,7 +415,7 @@ class MultiStageSPModel:
             iter += 1
 
             # Forward pass
-            I_prev, U_prev, f_prev, theta_val, lb, state_path = self.forward_pass()
+            I_prev, U_prev, f_prev, thetaval, lb, state_path = self.forward_pass()
             LB.append(lb)
 
             # Termination check
@@ -416,9 +425,9 @@ class MultiStageSPModel:
                 break
             
             # Backward pass (if not terminated)
-            cut_violFalg = self.backward_pass(I_prev, U_prev, f_prev, theta_val, state_path)
+            cut_violFalg = self.backward_pass(I_prev, U_prev, f_prev, thetaval, state_path)
 
-            # cut-violation bookkeeping (for stall termination test, etc.)
+            # cut-violation
             if cut_violFalg:
                 cutviol_iter = 0
             else:
