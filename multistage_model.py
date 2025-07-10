@@ -351,9 +351,9 @@ class MultiStageSPModel:
                     cutviolFlag = True
 
                 # Initialize coeff-dictionaries for each state variable
-                cut_I = {(i, r): 0.0 for i in range(self.V) for r in range(self.R)}
-                cut_U = {i: 0.0            for i in range(self.V)}
-                cut_f1 = {}               
+                cutcoef_I = {(i, r): 0.0 for i in range(self.V) for r in range(self.R)}
+                cutcoef_U = {i: 0.0            for i in range(self.V)}
+                cutcoef_f1 = {}               
                 cut_rhs = 0.0   
 
                 for k_state in self.nodeLists[t]:
@@ -362,14 +362,14 @@ class MultiStageSPModel:
                         # Demand-shortage constraints
                         for i in range(self.V):
                             lam = dual_demand[k_state, i] * self.transition_dict[n][k_state]
-                            cut_U[i] += lam                                                     # Coefficient
+                            cutcoef_U[i] += lam                                                 # Coefficient
                             cut_rhs += lam * U_prev[i]                                          # RHS
 
                         # Inventory-balance constraints
                         for i in range(self.V):
                             for r in range(self.R):
                                 lam = dual_inventory[k_state, i, r] * self.transition_dict[n][k_state]
-                                cut_I[i, r] += lam                                              # Coefficient
+                                cutcoef_I[i, r] += lam                                          # Coefficient
                                 cut_rhs += lam * I_prev[i, r]                                   # RHS
 
                         # Flow capacity constraints
@@ -380,10 +380,19 @@ class MultiStageSPModel:
                                     # Coefficient multiplies fixed parameter K_ijt, so only RHS:
                                     cut_rhs += lam * self.K_ijt[i][j][t-1]
 
+                        # In-transit flow constraints
+                        for (i, j, r, t_prime), lam_base in dual_transit.items():
+                            if k_state != lam_base[0]:    # key starts with k_state
+                                continue
+                            lam = lam_base[1] * self.transition_dict[n][k_state]      # lam_base = (k_state, value)
+                            cutcoef_f1[(i, j, r, t_prime)] = cutcoef_f1.get((i, j, r, t_prime), 0.0) + lam
+                            cut_rhs += lam * f_prev.get((i, j, r, t_prime), 0.0)
+
                 # Build the left-hand-side linear expression
                 lhs_expr  = self.theta[t-1, n]
-                lhs_expr += -gp.quicksum(cut_U[i] * self.U[t-1, n][i] for i in self.V)
-                lhs_expr += -gp.quicksum(cut_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
+                lhs_expr += -gp.quicksum(cutcoef_U[i] * self.U[t-1, n][i] for i in self.V)
+                lhs_expr += -gp.quicksum(cutcoef_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
+                lhs_expr += -gp.quicksum(coeff * self.f1[t-1, n][key] for key, coeff in cutcoef_f1.items())
 
                 # Add the cut
                 self.models[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}_{iter}")
@@ -419,7 +428,7 @@ class MultiStageSPModel:
             LB.append(lb)
 
             # Termination check
-            flag, Elapsed = msp_helper.termination_check(iter, relative_gap, LB, start, cutviol_iter, self.solveParams)
+            flag, Elapsed = msp_helper.termination_check(iter, relative_gap, LB, start, cutviol_iter, self.params)
             if flag != 0:
                 train_time = Elapsed
                 break

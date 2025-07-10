@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
-    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel)")
+    parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5, 6], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel), 6.multi-stage (SDDP)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = original (fixed arc capacity), 2 = with vehicle routing decisions")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
 
@@ -71,38 +71,38 @@ if __name__ == "__main__":
     print("\nGenerating in-sample demand...")
     demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
     
-    if args.debug:
-        demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, output_dir="Generated data/csv_by_location", debug_mode=True)
-        demand_processor.allocate_demand(demand_files = [f"Generated data/csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Generated data/Shelter_Demand.xlsx", network_processor=network_processor, debug_mode=True)
-        demand_processor.calculate_landfall_demand(wind_speed_file="Generated data/LandfallStates.xlsx", pod_info_file="Data/PoD location information.xlsx", output_file="Generated data/POD_Demand_total.xlsx", debug_mode=True)
-        demand_processor.distribute_demand_by_time(total_demand_file="Generated data/PoD_Demand_total.xlsx", network_processor=network_processor, output_file="Generated data/POD_Demand.xlsx", debug_mode=True)
-        demand_processor.combine_demand_data(shelter_file="Generated data/Shelter_Demand.xlsx",pod_file="Generated data/POD_Demand.xlsx", network_processor=network_processor, output_file="Generated data/demand_data_dynamic.xlsx", debug_mode=True)
-        demand_processor.generate_scenario_data()
-        demand_processor.load_demand_data()
+    if args.solution_method != 6:
+        if args.debug:
+            demand_processor.in_sample_data = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, output_dir="Generated data/csv_by_location", debug_mode=True)
+            demand_processor.allocate_demand(demand_files = [f"Generated data/csv_by_location/location_{i}.csv" for i in range(network_processor.num_pods)], output_file = "Generated data/Shelter_Demand.xlsx", network_processor=network_processor, debug_mode=True)
+            demand_processor.calculate_landfall_demand(wind_speed_file="Generated data/LandfallStates.xlsx", pod_info_file="Data/PoD location information.xlsx", output_file="Generated data/POD_Demand_total.xlsx", debug_mode=True)
+            demand_processor.distribute_demand_by_time(total_demand_file="Generated data/PoD_Demand_total.xlsx", network_processor=network_processor, output_file="Generated data/POD_Demand.xlsx", debug_mode=True)
+            demand_processor.combine_demand_data(shelter_file="Generated data/Shelter_Demand.xlsx",pod_file="Generated data/POD_Demand.xlsx", network_processor=network_processor, output_file="Generated data/demand_data_dynamic.xlsx", debug_mode=True)
+            demand_processor.generate_scenario_data()
+            demand_processor.load_demand_data()
 
-    else: 
-        in_sample_data, scaled_demands = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, debug_mode=args.debug)
-        df_landfall_states = demand_processor.save_landfall_states(in_sample_data, network_processor, debug_mode=args.debug)
-        shelter_demand_dict = demand_processor.allocate_demand(demand_data=scaled_demands, network_processor=network_processor, debug_mode=args.debug)
-        pod_total_demand_dict = demand_processor.calculate_landfall_demand(landfall_df=df_landfall_states, pod_info_file="Data/PoD location information.xlsx", debug_mode=args.debug)
-        pod_time_distributed_dict = demand_processor.distribute_demand_by_time(total_demand_dict=pod_total_demand_dict, network_processor=network_processor, debug_mode=args.debug)
-        combined_demand_dict = demand_processor.combine_demand_data(shelter_data_dict=shelter_demand_dict, pod_data_dict=pod_time_distributed_dict, network_processor=network_processor, debug_mode=args.debug)
-        demand_processor.populate_demand(combined_demand_dict)
+        else: 
+            in_sample_data, scaled_demands = demand_processor.generate_in_sample_demand(args.num_sce, network_processor, debug_mode=args.debug)
+            df_landfall_states = demand_processor.save_landfall_states(in_sample_data, network_processor, debug_mode=args.debug)
+            shelter_demand_dict = demand_processor.allocate_demand(demand_data=scaled_demands, network_processor=network_processor, debug_mode=args.debug)
+            pod_total_demand_dict = demand_processor.calculate_landfall_demand(landfall_df=df_landfall_states, pod_info_file="Data/PoD location information.xlsx", debug_mode=args.debug)
+            pod_time_distributed_dict = demand_processor.distribute_demand_by_time(total_demand_dict=pod_total_demand_dict, network_processor=network_processor, debug_mode=args.debug)
+            combined_demand_dict = demand_processor.combine_demand_data(shelter_data_dict=shelter_demand_dict, pod_data_dict=pod_time_distributed_dict, network_processor=network_processor, debug_mode=args.debug)
+            demand_processor.populate_demand(combined_demand_dict)
 
-    print("\nReading data...")  
-    # Print the output
-    print(f"\nAll counties: {network_processor.C}")
-    print(f"All locations: {network_processor.V}")
-    print(f"Warehouse/Supplier locations: {len(network_processor.V0)}, {network_processor.V0}")
-    print(f"Shelter locations: {len(network_processor.V1)}, {network_processor.V1}")
-    print(f"RSA locations: {len(network_processor.V2)}, {network_processor.V2}")
-    print(f"PoD locations: {len(network_processor.V3)}, {network_processor.V3}")
-    print(f"All resources: {network_processor.R}")
-    print(f"Time periods: {network_processor.T}")
-    print(f"Time Before Landfall: {network_processor.T_Bef}")
-    print(f"Time After Landfall: {network_processor.T_Aft}")
-    # print(f"Scenario indices: {demand_processor.sce}")
-    print(f"Scenario probabilities: {demand_processor.P}")
+        print("\nReading data...")  
+        # Print the output
+        print(f"\nAll counties: {network_processor.C}")
+        print(f"All locations: {network_processor.V}")
+        print(f"Warehouse/Supplier locations: {len(network_processor.V0)}, {network_processor.V0}")
+        print(f"Shelter locations: {len(network_processor.V1)}, {network_processor.V1}")
+        print(f"RSA locations: {len(network_processor.V2)}, {network_processor.V2}")
+        print(f"PoD locations: {len(network_processor.V3)}, {network_processor.V3}")
+        print(f"All resources: {network_processor.R}")
+        print(f"Time periods: {network_processor.T}")
+        print(f"Time Before Landfall: {network_processor.T_Bef}")
+        print(f"Time After Landfall: {network_processor.T_Aft}")
+        print(f"Scenario probabilities: {demand_processor.P}")
 
     # Run only the selected model
     if args.solution_method == 1:
@@ -287,3 +287,18 @@ if __name__ == "__main__":
             path_costs=total_costs,
             output_filename="Results/rh_results_parallel.xlsx"
         )
+
+    elif args.solution_method == 6:
+        from multistage_model import MultiStageSPModel 
+
+        # Initialize model instance
+        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params)
+
+        # Run the SDDP algorithm
+        LB, train_time, total_iter = sddp_model_instance.solve_sddp()
+
+        print(f"\n✅ SDDP Training Complete")
+        print(f"   Iterations: {total_iter}")
+        print(f"   Total Time: {train_time:.2f} seconds")
+        print(f"   Lower Bound Progression: {LB}")
+
