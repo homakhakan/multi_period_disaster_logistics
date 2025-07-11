@@ -53,12 +53,11 @@ class MultiStageSPModel:
     def stage_t_state_k_problem(self, t, k, last_stage=False):
         """
         Build the optimization model for *one* node (t, k) in the scenario tree.
-
         t : Stage index (time period).
         k : Markov-chain state realised
         last_stage : If True, we are at the deterministic multi-period terminal stage (θ removed).
         """
-    
+        
         # Create a model for each stage t
         m = gp.Model(f"Stage_{t}_state_{k}_model")
         m.setParam("OutputFlag", 0)

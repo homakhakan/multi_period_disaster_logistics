@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
-    # ----------- Simulated In-Sample Demand Setup for static 2SSP------------
+    # ---------- Simulated In-Sample Demand Setup for static 2SSP-----------
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     print("\nGenerating in-sample demand...")
     demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)

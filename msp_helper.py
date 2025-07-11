@@ -14,9 +14,8 @@ def build_node_lists(transition_dict):
     return nodeLists
 
 def MC_sample(t, current_state, transition_dict):
-    """
-    Draw one next state given current time t and current_state.
-    """
+    """ Draw one next state given current time t and current_state """
+    
     t_key     = str(t)
     state_key = str(current_state)
 
