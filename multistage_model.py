@@ -171,6 +171,27 @@ class MultiStageSPModel:
         "in_transit_update_constr": in_transit_update_constr
         }
     
+    
+    def last_stage_problem(self):
+
+        m = gp.Model("LastStage_MultiPeriod_Model")
+        m.setParam("OutputFlag", 0)
+        m.modelSense = GRB.MINIMIZE
+
+        # Define variables
+        I = {}
+        for i in range(self.V):
+            for r in range(self.R):
+                for t in range(self.t_L, self.T):  # t_L = time of landfall (9), T = last period of the time horizon (16) → t = 9 to 15
+                    I[i, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"I_{i}_{r}_{t}")
+
+        U = {}
+        for i in range(self.V):
+            for t in range(self.t_L, self.T):
+                U[i, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"U_{i}_{t}")
+    
+
+
     def build_models(self):
         """ Define optimization models for each (t, k) using the transition JSON file and msp_helper tools."""
 
