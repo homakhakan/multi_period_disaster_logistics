@@ -567,7 +567,7 @@ class DemandData:
 
         self.d_its_expected = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
 
-    def msp_demand_mapping(self, t, k_t):
+    def msp_demand_mapping(self, t, k_t, network_processor):
         """Return a dict {i: demand_i(t)} based on realized state k_t."""
 
         from demand_generation import demand_deterministic_landfall, data
@@ -584,10 +584,10 @@ class DemandData:
 
         # Build node-level dict
         demand_i = {}
-        for idx, i in enumerate(self.V1):   # shelters
+        for idx, i in enumerate(network_processor.V1):   # shelters
             demand_i[i] = shelter_demands[idx]
-        for i in range(self.V):             # non-shelters
-            if i not in self.V1:
+        for i in range(network_processor.V):             # non-shelters
+            if i not in network_processor.V1:
                 demand_i[i] = 0.0
         return demand_i
 

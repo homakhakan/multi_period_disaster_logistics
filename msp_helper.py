@@ -31,22 +31,22 @@ def termination_check(iter, relative_gap, LB, start, cutviol_iter, params):
     flag = 0
     Elapsed = time.time() - start
     
-    if iter > params.max_iter:
+    if iter > params["MAX_ITER"]:
         flag = 1
         print("max iteration is reached")
 
-    elif Elapsed > params.time_limit:
+    elif Elapsed > params["TIME_LIMIT"]:
         flag = 2
         print("time limit is reached")
 
-    elif cutviol_iter > params.cutviol_maxiter:
+    elif cutviol_iter > params["CUTVIOL_MAXITER"]:
         flag = 3
         print("cut violation is reached")
 
     else:
-        if iter > params.stall:
-            relative_gap = (LB[iter-1]-LB[iter-1-params.stall])/max(1e-10,abs(LB[iter-1-params.stall]))
-            if relative_gap < params.cutviol:
+        if iter > params["STALL"]:
+            relative_gap = (LB[iter-1]-LB[iter-1-params["STALL"]])/max(1e-10,abs(LB[iter-1-params["STALL"]]))
+            if relative_gap < params["CUTVIOL"]:
                 flag = 4
                 print("the LB is not making significant progress")
 

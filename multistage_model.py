@@ -20,6 +20,7 @@ class MultiStageSPModel:
         self.rel_gap = float(params["relative_gap"])
 
         self.V = network_processor.V
+        self.V0 = network_processor.V0
         self.V1 = network_processor.V1
         self.V3 = network_processor.V3
         self.R = network_processor.R
@@ -122,7 +123,7 @@ class MultiStageSPModel:
 
                 # Adjust RHS based on t
                 if t == 0:
-                    inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == self.network_processor.I_ir0[(i, r)], name=f"InventoryUpdate_{i}_{r}_t0")
+                    inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == self.network_processor.I_ir0[i][r], name=f"InventoryUpdate_{i}_{r}_t0")
                 else:
                     inventory_update_constr[i, r] = m.addConstr(I[i, r] + gp.quicksum(f[i, j, r] for j in range(self.V) if (i, j) in self.A) + S[i] * g_coeff == 0, name=f"InventoryUpdate_{i}_{r}_t{t}") 
 
@@ -153,7 +154,7 @@ class MultiStageSPModel:
             + gp.quicksum(
                 gp.quicksum(self.cost_ir[i][r] * f[i, j, r] for i in self.V0 for j in range(self.V) if (i, j) in self.A)
                 + gp.quicksum(self.m_ij[i][j] * f[i, j, r] for i in range(self.V) for j in range(self.V) if (i, j) in self.A) for r in range(self.R))
-            + theta
+            + (theta if theta is not None else 0)
         )
 
         m.setObjective(objective, GRB.MINIMIZE)
@@ -164,6 +165,7 @@ class MultiStageSPModel:
         "U": U,                    # state variable: unmet demand
         "f1": f1,                  # state variable: in-transit flow
         "f": f,                    # local variable: flow
+        "S": S,                    # local variable: satisfied demand
         "theta": theta,            # cost-to-go (None in last stage)
         "demand_shortage_constr": demand_shortage_constr,
         "inventory_update_constr": inventory_update_constr,
@@ -172,23 +174,23 @@ class MultiStageSPModel:
         }
     
     
-    def last_stage_problem(self):
+    # def last_stage_problem(self):
 
-        m = gp.Model("LastStage_MultiPeriod_Model")
-        m.setParam("OutputFlag", 0)
-        m.modelSense = GRB.MINIMIZE
+    #     m = gp.Model("LastStage_MultiPeriod_Model")
+    #     m.setParam("OutputFlag", 0)
+    #     m.modelSense = GRB.MINIMIZE
 
-        # Define variables
-        I = {}
-        for i in range(self.V):
-            for r in range(self.R):
-                for t in range(self.t_L, self.T):  # t_L = time of landfall (9), T = last period of the time horizon (16) → t = 9 to 15
-                    I[i, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"I_{i}_{r}_{t}")
+    #     # Define variables
+    #     I = {}
+    #     for i in range(self.V):
+    #         for r in range(self.R):
+    #             for t in range(self.t_L, self.T):  # t_L = time of landfall (9), T = last period of the time horizon (16) → t = 9 to 15
+    #                 I[i, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"I_{i}_{r}_{t}")
 
-        U = {}
-        for i in range(self.V):
-            for t in range(self.t_L, self.T):
-                U[i, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"U_{i}_{t}")
+    #     U = {}
+    #     for i in range(self.V):
+    #         for t in range(self.t_L, self.T):
+    #             U[i, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"U_{i}_{t}")
     
 
 
@@ -232,7 +234,7 @@ class MultiStageSPModel:
 
         k_t = self.nodeLists[0][0]      # First state at t=0
         state_path = [k_t]              # Keep track of visited states
-        thetaval = [0] * self.T_Bef     # Stores theta values (cost-to-go)
+        thetaval = [0] * len(self.T_Bef)     # Stores theta values (cost-to-go)
 
         # Initialize the state variables from t=0
         I_prev = {(i, r): 0 for i in range(self.V) for r in range(self.R)}
@@ -246,16 +248,17 @@ class MultiStageSPModel:
                 k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
                 state_path.append(k_t)          # Keep sample path history
                 self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
-            model_dict = self.models[t, k_t]
-            model = model_dict["model"]
+            # model_dict = self.models[t, k_t]
+            # model = model_dict["model"]
+            model = self.models[t, k_t]
             model.optimize() # Optimize the model
 
             # Check for the optimality and then extract the solution for updating state variables
             if model.status != gp.GRB.OPTIMAL:
                 raise RuntimeError(f"Model at t={t}, state={k_t} not optimal")
             else:
-                I_prev = {(i, r): model_dict["I"][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
-                U_prev = {i: model_dict["U"][i].X for i in range(self.V)} # Extract demand shortage (state var)
+                I_prev = {(i, r): self.I[t, k_t][i, r].X for i in range(self.V) for r in range(self.R)} # Extract inventory level (state var)
+                U_prev = {i: self.U[t, k_t][i].X for i in range(self.V)} # Extract demand shortage (state var)
 
                 # Extract the new in-transit flow for next stage
                 f_current = {}
@@ -266,13 +269,13 @@ class MultiStageSPModel:
                             if (i, j, t, t_prime) not in self.delta:
                                 f_current[(i, j, r, t_prime)] = f_prev.get((i, j, r, t_prime), 0.0)   # still travelling, keep it     
                 # Add NEW shipments that depart at the current stage t
-                for (i, j, r), var in model_dict["f"].items():  # local decision variable
+                for (i, j, r), var in self.f[t, k_t].items():  # local decision variable
                     if var.X > 1e-6:
                         f_current[(i, j, r, t)] = var.X    
                 # Save it to use as f_prev when we move to stage t+1
                 f_prev = f_current
 
-                thetaval[t] = self.theta[t, k_t].x
+                thetaval[t] = self.theta[t, k_t].x if self.theta[t, k_t] is not None else 0.0 # To avoid AttributeError: 'NoneType' object has no attribute 'x'
 
                 if t == 0:
                     lb = model.objVal               
@@ -283,7 +286,7 @@ class MultiStageSPModel:
         """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
 
         # Realized demand at stage t, given Markov state k_t
-        demand_real = self.demand_processor.msp_demand_mapping(t, k_t)
+        demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor)
     
         # Demand shortage rhs
         for i, cons in self.demand_shortage_constr[t, k_t].items():
@@ -359,8 +362,9 @@ class MultiStageSPModel:
                 Qvalue = 0
                 for k_state in self.nodeLists[t]:
                     # Accumulate expected cost-to-go from all reachable next-stage states with non-negligible transition probability
-                    if self.transition_dict[n][k_state] > self.smallest_trans_prob:
-                        Qvalue += Q[k_state] * self.transition_dict[n][k_state] 
+                    prob1 = self.transition_dict.get(str(n), {}).get(str(k_state), 0.0)
+                    if prob1 > self.smallest_trans_prob:
+                        Qvalue += Q[k_state] * prob1
 
                 # Check if cut is violated at the sample path encountered in the forward pass (Only interested in checking cut violation on the same node as the forward pass)
                 # n  : current state at stage t-1
@@ -377,18 +381,19 @@ class MultiStageSPModel:
                 cut_rhs = 0.0   
 
                 for k_state in self.nodeLists[t]:
-                    if self.transition_dict[n][k_state] > self.smallest_trans_prob:
+                    prob2 = self.transition_dict.get(str(n), {}).get(str(k_state), 0.0)
+                    if prob2 > self.smallest_trans_prob:
 
                         # Demand-shortage constraints
                         for i in range(self.V):
-                            lam = dual_demand[k_state, i] * self.transition_dict[n][k_state]
+                            lam = dual_demand[k_state, i] * prob2
                             cutcoef_U[i] += lam                                                 # Coefficient
                             cut_rhs += lam * U_prev[i]                                          # RHS
 
                         # Inventory-balance constraints
                         for i in range(self.V):
                             for r in range(self.R):
-                                lam = dual_inventory[k_state, i, r] * self.transition_dict[n][k_state]
+                                lam = dual_inventory[k_state, i, r] * prob2
                                 cutcoef_I[i, r] += lam                                          # Coefficient
                                 cut_rhs += lam * I_prev[i, r]                                   # RHS
 
@@ -396,7 +401,7 @@ class MultiStageSPModel:
                         for i in range(self.V):
                             for j in range(self.V):
                                 if (i, j) in self.A:
-                                    lam = dual_capacity[k_state, i, j] * self.transition_dict[n][k_state]
+                                    lam = dual_capacity[k_state, i, j] * prob2
                                     # Coefficient multiplies fixed parameter K_ijt, so only RHS:
                                     cut_rhs += lam * self.K_ijt[i][j][t-1]
 
@@ -404,13 +409,13 @@ class MultiStageSPModel:
                         for (i, j, r, t_prime), lam_base in dual_transit.items():
                             if k_state != lam_base[0]:    # key starts with k_state
                                 continue
-                            lam = lam_base[1] * self.transition_dict[n][k_state]      # lam_base = (k_state, value)
+                            lam = lam_base[1] * prob2      # lam_base = (k_state, value)
                             cutcoef_f1[(i, j, r, t_prime)] = cutcoef_f1.get((i, j, r, t_prime), 0.0) + lam
                             cut_rhs += lam * f_prev.get((i, j, r, t_prime), 0.0)
 
                 # Build the left-hand-side linear expression
                 lhs_expr  = self.theta[t-1, n]
-                lhs_expr += -gp.quicksum(cutcoef_U[i] * self.U[t-1, n][i] for i in self.V)
+                lhs_expr += -gp.quicksum(cutcoef_U[i] * self.U[t-1, n][i] for i in range(self.V))
                 lhs_expr += -gp.quicksum(cutcoef_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
                 lhs_expr += -gp.quicksum(coeff * self.f1[t-1, n][key] for key, coeff in cutcoef_f1.items())
 
@@ -421,6 +426,8 @@ class MultiStageSPModel:
 
     # Train model
     def solve_sddp(self):
+
+        self.build_models()
 
         I_ir0 = self.network_processor.I_ir0
         k_init = self.nodeLists[0][0]
@@ -435,7 +442,7 @@ class MultiStageSPModel:
         relative_gap = self.rel_gap
         lb = 0
         LB = []          # lower-bound history 
-        thetaval = [0] * self.T_Bef
+        thetaval = [0] * len(self.T_Bef)
         iter = 0
         cutviol_iter = 0
         start = time.time()
