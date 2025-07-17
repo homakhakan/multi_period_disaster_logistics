@@ -248,8 +248,6 @@ class MultiStageSPModel:
                 k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
                 state_path.append(k_t)          # Keep sample path history
                 self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
-            # model_dict = self.models[t, k_t]
-            # model = model_dict["model"]
             model = self.models[t, k_t]
             model.optimize() # Optimize the model
 
@@ -406,12 +404,24 @@ class MultiStageSPModel:
                                     cut_rhs += lam * self.K_ijt[i][j][t-1]
 
                         # In-transit flow constraints
-                        for (i, j, r, t_prime), lam_base in dual_transit.items():
-                            if k_state != lam_base[0]:    # key starts with k_state
-                                continue
-                            lam = lam_base[1] * prob2      # lam_base = (k_state, value)
-                            cutcoef_f1[(i, j, r, t_prime)] = cutcoef_f1.get((i, j, r, t_prime), 0.0) + lam
-                            cut_rhs += lam * f_prev.get((i, j, r, t_prime), 0.0)
+                        for i in range(self.V):
+                            for j in range(self.V):
+                                if (i, j) in self.A:
+                                    for r in range(self.R):
+                                        for t_prime in range(0, t):
+                                            key = (k_state, i, j, r, t_prime)
+                                            if key in dual_transit:
+                                                lam = dual_transit[key] * prob2
+                                                cutcoef_f1[i, j, r, t_prime] = cutcoef_f1.get((i, j, r, t_prime), 0.0) + lam
+                                                cut_rhs += lam * f_prev[i, j, r, t_prime]
+
+
+                        # for (i, j, r, t_prime), lam_base in dual_transit.items(): # Only aggregating duals belonging to the current k_state in the outer loop (reachable from n at stage t).
+                        #     if k_state != lam_base[0]:    # key starts with k_state
+                        #         continue
+                        #     lam = lam_base[1] * prob2      # lam_base = (k_state, value)
+                        #     cutcoef_f1[(i, j, r, t_prime)] = cutcoef_f1.get((i, j, r, t_prime), 0.0) + lam
+                        #     cut_rhs += lam * f_prev.get((i, j, r, t_prime), 0.0)
 
                 # Build the left-hand-side linear expression
                 lhs_expr  = self.theta[t-1, n]
