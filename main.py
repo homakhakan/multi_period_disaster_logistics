@@ -275,9 +275,9 @@ if __name__ == "__main__":
         end_time_rh = time.time()
         total_time_rh = end_time_rh - start_time_rh
 
-        print(f"\n📊 Average RH Objective Value: {avg_cost:.2f}")
-        print(f"🧾 Total RH Costs per Sample Path: {total_costs}")
-        print(f"⏱️ Total Execution Time for RH Evaluation: {total_time_rh:.2f} seconds")
+        print(f"\nAverage RH Objective Value: {avg_cost:.2f}")
+        print(f" Total RH Costs per Sample Path: {total_costs}")
+        print(f" Total Execution Time for RH Evaluation: {total_time_rh:.2f} seconds")
 
         output.rh_results(
             instance_version=args.instance_version,
