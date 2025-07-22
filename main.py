@@ -297,16 +297,16 @@ if __name__ == "__main__":
         sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params)
 
         # === PROFILING START ===
-        profiler = cProfile.Profile()
-        profiler.enable()
+        # profiler = cProfile.Profile()
+        # profiler.enable()
 
         # Run the SDDP algorithm
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
 
 
-        profiler.disable()
-        stats = pstats.Stats(profiler).sort_stats('cumtime')
-        stats.print_stats(30)  # Show top 30 time-consuming functions
+        # profiler.disable()
+        # stats = pstats.Stats(profiler).sort_stats('cumtime')
+        # stats.print_stats(30)  # Show top 30 time-consuming functions
 
         # === PROFILING END ===
 
