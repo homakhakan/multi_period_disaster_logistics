@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import msp_helper
 import time
+from openpyxl import load_workbook
+import os
 
 class MultiStageSPModel:
     def __init__(self, network_processor, demand_processor, params):
@@ -285,10 +287,15 @@ class MultiStageSPModel:
 
         # Realized demand at stage t, given Markov state k_t
         demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor)
+
+        # Print demand for debugging
+        #print(f"Stage t={t}, State k_t={k_t}, Demand: {[f'{demand_real[i]:.2f}' for i in sorted(demand_real)]}")
     
         # Demand shortage rhs
         for i, cons in self.demand_shortage_constr[t, k_t].items():
-            rhs = U_prev.get(i, 0) + demand_real.get(i, 0)
+            rhs = U_prev[i] + demand_real[i]
+            # Print for debugging
+            #print(f" t={t}, k_t={k_t}, node={i} | U_prev={U_prev[i]:.2f}, demand={demand_real[i]:.2f}, RHS={rhs:.2f}")
             cons.setAttr(GRB.Attr.RHS, rhs)
 
         # Inventory flow-balance rhs
@@ -299,7 +306,7 @@ class MultiStageSPModel:
                     for t_prime in range(0, t):
                         if (j, i, t, t_prime) in self.delta:
                             arrivals += f_prev.get((j, i, r, t_prime), 0)
-            rhs = I_prev.get((i, r), 0) + arrivals
+            rhs = I_prev[(i, r)] + arrivals
             cons.setAttr(GRB.Attr.RHS, rhs)
         
         # In-transit flow rhs
@@ -363,6 +370,10 @@ class MultiStageSPModel:
                     prob1 = self.transition_dict.get(str(n), {}).get(str(k_state), 0.0)
                     if prob1 > self.smallest_trans_prob:
                         Qvalue += Q[k_state] * prob1
+
+                # Debugging
+                if abs(Qvalue - thetaval[t - 1]) > 1e-4:
+                    print(f"t={t}, n={n}, Qvalue={Qvalue:.2f}, theta={thetaval[t-1]:.2f}, diff={(Qvalue - thetaval[t - 1]):.4f}")
 
                 # Check if cut is violated at the sample path encountered in the forward pass (Only interested in checking cut violation on the same node as the forward pass)
                 # n  : current state at stage t-1
@@ -473,6 +484,13 @@ class MultiStageSPModel:
             # Backward pass (if not terminated)
             cut_violFalg = self.backward_pass(I_prev, U_prev, f_prev, thetaval, state_path)
 
+            # Save first-stage solution for this iteration
+            self.save_first_stage_solution(iter)
+
+            # Print outputs for debugging
+            print(f"Iteration {iter:>2} | LB: {lb:.2f} | Cut Violated: {cut_violFalg}")
+            #print(f"   Sampled Markov Path: {state_path}") 
+
             # cut-violation
             if cut_violFalg:
                 cutviol_iter = 0
@@ -480,6 +498,46 @@ class MultiStageSPModel:
                 cutviol_iter += 1
 
         return LB, train_time, iter
+    
+
+    def save_first_stage_solution(self, iter_num):
+        # Extract first-stage k value (should be only one at t=0)
+        k_init = self.nodeLists[0][0]
+        t = 0  # First stage
+
+        # ---------------- I[i, r] ----------------
+        I_data = [(i, r, self.I[t, k_init][i, r].X) for i in range(self.V) for r in range(self.R)]
+        I_df = pd.DataFrame(I_data, columns=['i', 'r', 'value'])
+        I_file = 'I_first_stage.xlsx'
+        with pd.ExcelWriter(I_file, mode='a' if os.path.exists(I_file) else 'w', engine='openpyxl') as writer:
+            I_df.to_excel(writer, sheet_name=f'Iter_{iter_num}', index=False)
+
+        # ---------------- U[i] ----------------
+        U_data = [(i, self.U[t, k_init][i].X) for i in range(self.V)]
+        U_df = pd.DataFrame(U_data, columns=['i', 'value'])
+        U_file = 'U_first_stage.xlsx'
+        with pd.ExcelWriter(U_file, mode='a' if os.path.exists(U_file) else 'w', engine='openpyxl') as writer:
+            U_df.to_excel(writer, sheet_name=f'Iter_{iter_num}', index=False)
+
+        # ---------------- f[i, j, r] ----------------
+        f_data = [(i, j, r, self.f[t, k_init][i, j, r].X)
+                for i in range(self.V) for j in range(self.V)
+                if (i, j) in self.A for r in range(self.R)]
+        f_df = pd.DataFrame(f_data, columns=['i', 'j', 'r', 'value'])
+        f_file = 'f_first_stage.xlsx'
+        with pd.ExcelWriter(f_file, mode='a' if os.path.exists(f_file) else 'w', engine='openpyxl') as writer:
+            f_df.to_excel(writer, sheet_name=f'Iter_{iter_num}', index=False)
+
+        # # ---------------- f1[i, j, r, t′] ----------------
+        # f1_data = [(i, j, r, t_prime, self.f1[t, k_init][i, j, r, t_prime].X)
+        #         for i in range(self.V) for j in range(self.V)
+        #         if (i, j) in self.A for r in range(self.R)
+        #         for t_prime in self.f1[t, k_init][i, j, r]]  # t′ keys already defined in model
+        # f1_df = pd.DataFrame(f1_data, columns=['i', 'j', 'r', 't_prime', 'value'])
+        # f1_file = 'f1_first_stage.xlsx'
+        # with pd.ExcelWriter(f1_file, mode='a' if os.path.exists(f1_file) else 'w', engine='openpyxl') as writer:
+        #     f1_df.to_excel(writer, sheet_name=f'Iter_{iter_num}', index=False)
+
     
         
  

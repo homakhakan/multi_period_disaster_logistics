@@ -290,12 +290,25 @@ if __name__ == "__main__":
 
     elif args.solution_method == 6:
         from multistage_model import MultiStageSPModel 
+        import cProfile
+        import pstats
 
         # Initialize model instance
         sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params)
 
+        # === PROFILING START ===
+        profiler = cProfile.Profile()
+        profiler.enable()
+
         # Run the SDDP algorithm
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
+
+
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumtime')
+        stats.print_stats(30)  # Show top 30 time-consuming functions
+
+        # === PROFILING END ===
 
         print(f"\n✅ SDDP Training Complete")
         print(f"   Iterations: {total_iter}")
