@@ -62,6 +62,7 @@ class MultiStageSPModel:
             "rhs_total": 0.0
         }
 
+        self.first_stage_history = []
 
     def stage_t_state_k_problem(self, t, k, last_stage=False):
         """
@@ -301,7 +302,7 @@ class MultiStageSPModel:
         demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor)
 
         # Print demand for debugging
-        #print(f"Stage t={t}, State k_t={k_t}, Demand: {[f'{demand_real[i]:.2f}' for i in sorted(demand_real)]}")
+        print(f"Stage t={t}, State k_t={k_t}, Nonzero Demand: {[f'{demand_real[i]:.2f}' for i in sorted(demand_real) if abs(demand_real[i]) > 1e-6]}")
     
         # Demand shortage rhs
         for i, cons in self.demand_shortage_constr[t, k_t].items():
@@ -514,6 +515,23 @@ class MultiStageSPModel:
             # Forward pass
             I_prev, U_prev, f_prev, thetaval, lb, state_path = self.forward_pass()
             LB.append(lb)
+
+            # === Track first-stage solution for debugging ===
+            k_init = self.nodeLists[0][0]  # First-stage state
+
+            I0 = tuple(round(self.I[0, k_init][i, r].X, 4) for i in range(self.V) for r in range(self.R))
+            U0 = tuple(round(self.U[0, k_init][i].X, 4) for i in range(self.V))
+            f0 = tuple(round(self.f[0, k_init][i, j, r].X, 4) for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R))
+
+            current_sol = (I0, U0, f0)
+
+            if self.first_stage_history and self.first_stage_history[-1] == current_sol:
+                print(f"[Iteration {iter}] First-stage solution unchanged.")
+            else:
+                print(f"[Iteration {iter}] First-stage solution changed.")
+
+            self.first_stage_history.append(current_sol)
+            # === End tracking block ===
 
             # Termination check
             flag, Elapsed = msp_helper.termination_check(iter, relative_gap, LB, start, cutviol_iter, self.params)
