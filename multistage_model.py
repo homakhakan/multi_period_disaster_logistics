@@ -52,6 +52,12 @@ class MultiStageSPModel:
         self.transition_dict = msp_helper.load_transition_dict(transition_path)
         self.nodeLists = msp_helper.build_node_lists(self.transition_dict)
 
+        self.timer_stats = {
+            "rhs_unmet": 0.0,
+            "rhs_inventory": 0.0,
+            "rhs_intransit": 0.0,
+            "rhs_total": 0.0,
+        }
 
     def stage_t_state_k_problem(self, t, k, last_stage=False):
         """
@@ -285,6 +291,9 @@ class MultiStageSPModel:
     def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f_prev):
         """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
 
+        start_total = time.time()
+
+        start = time.time()
         # Realized demand at stage t, given Markov state k_t
         demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor)
 
@@ -298,6 +307,9 @@ class MultiStageSPModel:
             #print(f" t={t}, k_t={k_t}, node={i} | U_prev={U_prev[i]:.2f}, demand={demand_real[i]:.2f}, RHS={rhs:.2f}")
             cons.setAttr(GRB.Attr.RHS, rhs)
 
+        self.timer_stats["rhs_unmet"] += time.time() - start
+
+        start = time.time()
         # Inventory flow-balance rhs
         for (i, r), cons in self.inventory_update_constr[t, k_t].items():
             arrivals = 0
@@ -308,7 +320,10 @@ class MultiStageSPModel:
                             arrivals += f_prev.get((j, i, r, t_prime), 0)
             rhs = I_prev[(i, r)] + arrivals
             cons.setAttr(GRB.Attr.RHS, rhs)
+
+        self.timer_stats["rhs_inventory"] += time.time() - start
         
+        start = time.time()
         # In-transit flow rhs
         for (i, j, r, t_prime), cons in self.in_transit_update_constr[t, k_t].items():
             if (i, j, t, t_prime) not in self.delta:
@@ -316,6 +331,10 @@ class MultiStageSPModel:
             else:
                 rhs = 0
             cons.setAttr(GRB.Attr.RHS, rhs)
+
+        self.timer_stats["rhs_intransit"] += time.time() - start
+
+        self.timer_stats["rhs_total"] += time.time() - start_total
 
     def backward_pass(self, I_prev, U_prev, f_prev, thetaval, state_path):
         
@@ -496,6 +515,10 @@ class MultiStageSPModel:
                 cutviol_iter = 0
             else:
                 cutviol_iter += 1
+
+        print("\n====== Aggregated Profiling Stats (mspFP_update_rhs) ======")
+        for key, val in self.timer_stats.items():
+            print(f"{key:<20}: {val:.4f} sec")
 
         return LB, train_time, iter
     
