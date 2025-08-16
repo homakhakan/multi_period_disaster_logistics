@@ -11,19 +11,19 @@ class NetworkData:
         self.thetaLB = float(params["THETA_LB"])
         self.eps = float(params["EPS"])
         self.T_BEF = int(params["T_BEF"])
+        self.total_hours = int(params["TOTAL_HOURS"])
+        self.fuel_cost_per_mile = float(params["FUEL_COST_PER_MILE"])
 
         # Load file paths
         self.get_file_paths()
 
         # Load data files
         self.df_V = pd.read_excel(self.file_paths["location_file"])
-        self.df_C = pd.read_excel(self.file_paths["county_file"])
         self.df_R = pd.read_excel(self.file_paths["resource_file"])
-        self.df_inputs = pd.read_excel(self.file_paths["inputs_file"])
-        self.df_K = pd.read_excel(self.file_paths["k_ijt_file"])
+        self.df_K = pd.read_excel(self.file_paths["arc_capacity_file"])
 
         # Load matrices
-        self.timeMatrix = np.loadtxt(self.file_paths["time_matrix_file"])
+        self.durationMatrix = np.loadtxt(self.file_paths["duration_matrix_file"])
         self.distanceMatrix = np.loadtxt(self.file_paths["distance_matrix_file"])
 
     @property
@@ -51,21 +51,18 @@ class NetworkData:
     def get_file_paths(self):
     
         self.file_paths = {
-            "location_file": f"Data/fullDist Set V Data Location-{self.instance_version} - Copy (2).xlsx",
-            "county_file": f"Data/fullDist Set C Data-{self.instance_version}.xlsx",
-            "resource_file": f"Data/fullDist R-{self.instance_version}.xlsx",
-            "time_matrix_file": f"Data/durationFull-{self.instance_version} - Copy (2).txt",
-            "distance_matrix_file": f"Data/distanceFull-{self.instance_version} - Copy (2).txt",
-            "inputs_file": f"Data/fullDistInputs-{self.instance_version}.xlsx",
-            "k_ijt_file": f"Data/K_ijt_data_fixed-{self.instance_version} - Copy (2).xlsx",
+            "location_file": f"Data/Set V_locations_{self.instance_version}.xlsx",
+            "resource_file": f"Data/Set R_resources_{self.instance_version}.xlsx",
+            "duration_matrix_file": f"Data/Duration_all_nodes_{self.instance_version}.txt",
+            "distance_matrix_file": f"Data/Distance_all_nodes_{self.instance_version}.txt",
+            "arc_capacity_file": f"Data/Arc_capacity_{self.instance_version}.xlsx",
         }
 
     def define_sets(self):
-      
-        self.C = len(self.df_C)  # Number of counties
+
         self.V = len(self.df_V)  # Number of locations
         self.R = len(self.df_R)  # Number of resources
-        self.T = int(self.df_inputs['Hours in 6 days'][0] / self.tperiod)  # Compute time periods
+        self.T = int(self.total_hours / self.tperiod)  # Compute time periods
 
         # Subsets of Locations
         self.V0, self.V1, self.V2, self.V3 = [], [], [], []
@@ -91,36 +88,50 @@ class NetworkData:
         self.A = self.create_arc_set()
 
     def create_arc_set(self):
-   
         self.A = set()
-        no_demand = []
 
-        # Identify locations with no demand
-        for i in set(self.V1).union(set(self.V3)):
-            if not any(self.df_V['County'][i] == self.df_C['County'][c] and self.df_C['Shelter Total Demand'][c] > 0 for c in range(self.C)):
-                no_demand.append(i)
+        # nodes with no demand
+        no_demand = set()
 
-        # Generate valid arcs
+        # classify V0 dynamically from the Type column
+        W = {i for i in self.V0 if str(self.df_V.at[i, 'Type']).lower() == 'warehouse'}
+        S = {i for i in self.V0 if str(self.df_V.at[i, 'Type']).lower() == 'supplier'}
+
+        # build arcs
         for i in range(self.V):
+            if i in no_demand:
+                continue
             for j in range(self.V):
-                if i != j and i not in no_demand and j not in no_demand:
-                    if (i not in self.V1 or j not in self.V3) and (i not in self.V3 or j not in self.V1):
-                        self.A.add((i, j))
+                if j == i or j in no_demand:
+                    continue
+                # no Shelter <-> PoD in either direction
+                if (i in self.V1 and j in self.V3) or (i in self.V3 and j in self.V1):
+                    continue
+                # If origin is Shelter, only allow Shelter→Shelter
+                if i in self.V1 and j not in self.V1:
+                    continue
+
+                # If origin is PoD, only allow PoD→PoD
+                if i in self.V3 and j not in self.V3:
+                    continue
+                # RSA -> only Shelter or PoD, or another RSA (no self-loop)
+                if i in self.V2:
+                    if not (j in self.V1 or j in self.V3 or (j in self.V2 and j != i)):
+                        continue
+                # V0 internal: allow only Supplier -> Warehouse
+                if i in self.V0 and j in self.V0 and not (i in S and j in W):
+                    continue
+                self.A.add((i, j))
 
         return self.A
 
-    def define_parameters(self):
-    
-        self.W_k = self.df_inputs['People on Truck'][0]  # People on truck          
-        self.tp_salary = self.df_inputs['People on Truck'][0] * self.tperiod  # Salary per time period    
-        self.fuel = self.df_inputs['Fuel Cost Per Mile'][0] * self.params["MILES_TO_METERS"] # Fuel cost per meter (converted from miles)    
-
-        # Opening costs per location type
-        self.open_array = [self.df_inputs[key][0] for key in self.params["OPEN_COST_KEYS"]]
+    def define_parameters(self, travel_time):
+        
+        self.fuel = self.fuel_cost_per_mile * self.params["MILES_TO_METERS"] # Fuel cost per meter (converted from miles)    
 
         # Initialize inventory list
         selected_columns = self.params["INVENTORY_COLUMNS"][self.instance_version]
-
+        
         Inv = []
         for i in range(len(self.df_V)):
             Inv.extend([self.df_V[col][i] for col in selected_columns])
@@ -131,17 +142,20 @@ class NetworkData:
         # Penalty costs per location
         self.multiplier1 = float(self.params["MULTIPLIER1"])
         self.p_i = (self.df_V["P_i"] * self.multiplier1).tolist()
+        
+        if travel_time == 1:
+            # Travel time in time periods (travel times are only 1 time period)
+            self.t_ijt = np.ones((self.V, self.V), dtype=int)  # fill with 1s
+            np.fill_diagonal(self.t_ijt, 0)  # set diagonal to 0
+            # Loop through durationMatrix to find off-diagonal zeros
+            for i in range(self.V):
+                for j in range(self.V):
+                    if i != j and self.durationMatrix[i][j] == 0:
+                        self.t_ijt[i][j] = 0
 
-        # Travel time in time periods (travel times are only 1 time period)
-        # seconds_per_hour = 3600
-        # self.t_ijt = [[math.ceil((self.timeMatrix[i][j] / seconds_per_hour) / self.tperiod) for j in range(len(self.df_V))] for i in range(len(self.df_V))]
-
-        # Travel time in time periods (randomized to create variation)
-        # seconds_per_hour = 3600
-        # self.t_ijt = []
-
-        # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
-        self.t_ijt = pd.read_csv("Data/t_ijt_matrix_randomized - Copy (2).csv").values.tolist()
+        elif travel_time == 2:
+            # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
+            self.t_ijt = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
 
         #Starting number of trucks at location i (time period 0)
         self.C_i0 = self.df_V["TruckStart"].tolist()
@@ -151,22 +165,20 @@ class NetworkData:
 
         # Travel cost between locations
         self.multiplier2 = float(self.params["MULTIPLIER2"])  # Scaling factor
-        self.m_ij = [
-            [
-                ((self.distanceMatrix[i][j] * self.fuel) + (self.t_ijt[i][j] * self.tp_salary * self.W_k) + (self.h_i[i] * self.tp_salary * self.W_k)) * self.multiplier2
-                for j in range(len(self.df_V))
-            ]
-            for i in range(len(self.df_V))
-        ]
+        self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) * self.multiplier2 for j in range(len(self.df_V))] for i in range(len(self.df_V))]
 
         # Procurement cost per resource
         self.cost_ir = []
+        idx = self.df_V[self.df_V['Type'].isin(['Warehouse', 'Supplier'])].index
         for i in range(len(self.df_V)):
-            if i in self.df_V[self.df_V['Type'].isin(['Warehouse', 'Supplier'])].index:
-                self.cost_ir.append([0, 0, self.df_V['Water PC'][i], self.df_V['Food PC'][i], 0, 0])
+            if i in idx:
+                water_pc = float(self.df_V.at[i, 'Water PC'])
+                food_pc = float(self.df_V.at[i, 'Food PC'])
+                self.cost_ir.append([water_pc, food_pc, 0, 0])
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
+
         
         # Factor of pallet required per commodity r
         self.g_shelter = self.df_R['pallet per S-Kit'].tolist()

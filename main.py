@@ -46,12 +46,13 @@ if __name__ == "__main__":
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5, 6], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel), 6.multi-stage (SDDP)")
-    parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = original (fixed arc capacity), 2 = with vehicle routing decisions")
+    parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = Using fixed arc capacity, 2 = with vehicle routing decisions")
+    parser.add_argument("-tt", "--travel_time", type=int, choices=[1, 2], help="Travel-time mode: 1. All arcs take 1 period to travel, 2. Some arcs might take more than 1 period to travel")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
 
-    # New args
+    # New args for running the rolling horizon more easily on Palmetto (Run simultaneously)
     parser.add_argument("-si", "--start_index", type=int, default=0, help="Row index in the CSV where this job should start reading")
-    parser.add_argument("-np", "--num_paths",   type=int, default=100, help="How many sample-path rows to read (chunk size)")
+    parser.add_argument("-np", "--num_paths",   type=int, default=2, help="How many sample-path rows to read (chunk size)")
 
     args = parser.parse_args()
 
@@ -62,14 +63,36 @@ if __name__ == "__main__":
     eps = float(params["EPS"])
     network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
     network_processor.define_sets() # Now call the methods using this instance
-    network_processor.define_parameters()
+    network_processor.define_parameters(args.travel_time)
+
+    # Debugging
+    # print("Number of arcs in network:", len(network_processor.A))
+    # print("Arc capacities K_ijt: max =", np.max(network_processor.K_ijt), ", min =", np.min(network_processor.K_ijt))
+    
+    # # Debugging
+    # print("Travel cost matrix (m_ij): min =", np.min(network_processor.m_ij), ", max =", np.max(network_processor.m_ij))
+    # print("Penalty cost per location (p_i):")
+    # for i, p in enumerate(network_processor.p_i):
+    #     print(f"Location {i}: Penalty = {p}")
+
+    # df_m_ij = pd.DataFrame(
+    #     network_processor.m_ij,
+    #     columns=[f"To_{j}" for j in range(len(network_processor.df_V))]
+    # )
+    # df_m_ij.index = [f"From_{i}" for i in range(len(network_processor.df_V))]
+
+    # print("Travel Cost Matrix (m_ij):")
+    # print(df_m_ij)
+
+    # # Optional: Save to Excel for inspection
+    # df_m_ij.to_excel("travel_cost_matrix.xlsx")
 
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
     # ---------- Simulated In-Sample Demand Setup for static 2SSP-----------
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     print("\nGenerating in-sample demand...")
-    demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter.xlsx", network_processor=network_processor)
+    demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/Distance_podtoshelter.xlsx", network_processor=network_processor)
     
     if args.solution_method != 6:
         if args.debug:
@@ -139,12 +162,12 @@ if __name__ == "__main__":
         total_costs = []
 
         # Load inputs once
-        demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/distanceFull-podtoshelter - Copy (2).xlsx", network_processor=network_processor)
+        demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/Distance_podtoshelter.xlsx", network_processor=network_processor)
 
-        sample_paths_file = "Data/real_sample_paths_new.csv"
+        sample_paths_file = "Data/real_sample_paths.csv"
         
         # Load OOS sample paths (CSV)
-        OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths_new.csv"
+        OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths.csv"
         OS_paths = OS_paths_df.values
 
         # Compute landfall time once
@@ -235,7 +258,7 @@ if __name__ == "__main__":
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "Data/real_sample_paths_new.csv"
+        sample_paths_file = "Data/real_sample_paths.csv"
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation(
@@ -264,7 +287,7 @@ if __name__ == "__main__":
     elif args.solution_method == 5:
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
-        sample_paths_file = "Data/real_sample_paths_new.csv"  # make sure this exists on Palmetto
+        sample_paths_file = "Data/real_sample_paths.csv"  # make sure this exists on Palmetto
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation_parallel(
@@ -294,7 +317,7 @@ if __name__ == "__main__":
         import pstats
 
         # Initialize model instance
-        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params)
+        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params, args.travel_time)
 
         # === PROFILING START ===
         # profiler = cProfile.Profile()
@@ -313,5 +336,6 @@ if __name__ == "__main__":
         print(f"\n✅ SDDP Training Complete")
         print(f"   Iterations: {total_iter}")
         print(f"   Total Time: {train_time:.2f} seconds")
-        print(f"   Lower Bound Progression: {LB}")
+        print("   Lower Bound Progression:", [round(val, 2) for val in LB])
+
 
