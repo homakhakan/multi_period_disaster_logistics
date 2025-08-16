@@ -1,13 +1,14 @@
 # Network
 TPERIOD: 12 # Time discretization in hours
 T_BEF: 10 # Time periods before landfall (T_Bef)
+TOTAL_HOURS: 192 # total hours during the planning horizon (8 days: 5 days before and 3 days after landfall)
 MILES_TO_METERS: 0.000621371
+FUEL_COST_PER_MILE: 0.1 
 
-OPEN_COST_KEYS: ["Open Cost V0", "Open Cost V1", "Open Cost V2", "Open Cost V3"]
 
 INVENTORY_COLUMNS:
-  original: ["S-Kit StartInv", "P-Kit StartInv", "Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
-  largesize: ["S-Kit StartInv", "P-Kit StartInv", "Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
+  original: ["Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
+  largesize: ["Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
   smallsize: ["Water StartInv"]
   mediumsize: ["Water StartInv", "Blanket StartInv"]
 
@@ -31,9 +32,9 @@ EPS: 1e-5
 # Multi-Stage
 smallest_trans_prob: 0.0005
 CUTVIOL: 0.0001
-MAX_ITER: 1
-STALL: 200
+MAX_ITER: 100000
+STALL: 500
 CUTVIOL_MAXITER: 100000
-TIME_LIMIT: 10800
+TIME_LIMIT: 18000
 LOWER_BOUND: 1e10
 relative_gap: 1e10
