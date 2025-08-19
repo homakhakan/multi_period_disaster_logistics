@@ -306,11 +306,11 @@ class MultiStageSPModel:
             # print(f"\n--- Debug: Decision Variables at t={t}, k_t={k_t} ---")
             # print(f"Objective Value: {model.ObjVal:.2f}")
 
-            # # f: shipment flow
+            # f: shipment flow
             # print("\nNon-zero f[i,j,r]:")
-            # for (i, j, r), var in self.f[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  f[{i},{j},{r}] = {var.X:.2f}")
+            for (i, j, r), var in self.f[t, k_t].items():
+                if var.X > 1e-6:
+                    print(f"  f[{i},{j},{r}] = {var.X:.2f}")
 
             # # I: inventory
             # print("\nNon-zero I[i,r]:")
@@ -324,11 +324,11 @@ class MultiStageSPModel:
             #     if var.X > 1e-6:
             #         print(f"  U[{i}] = {var.X:.2f}")
 
-            # # S: satisfied demand
+            # S: satisfied demand
             # print("\nNon-zero S[i]:")
-            # for i, var in self.S[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  S[{i}] = {var.X:.2f}")
+            for i, var in self.S[t, k_t].items():
+                if var.X > 1e-6:
+                    print(f"  S[{i}] = {var.X:.2f}")
 
             # # Theta (if exists)
             # theta_var = self.theta[t, k_t]
@@ -642,17 +642,19 @@ class MultiStageSPModel:
                     Q[k_state] = model.ObjVal    # Save the objective value for this (t , k_state)
                     # print("Q=", Q[k_state])
                     # Extract dual values for each constraint set
+                    # print("========t:", t)
                     # print("dual demand:")
                     for i in range(self.V):
                         dual_demand[k_state, i] = self.demand_shortage_constr[t, k_state][i].pi
-                        # if abs(dual_demand[k_state, i]) > 1e-6:
-                        #     print(f"{k_state}, {i}, {dual_demand[k_state, i]}")
+                        if dual_demand[k_state, i] < -1e-6:
+                            print(f"{k_state}, {i}, {dual_demand[k_state, i]}")
 
+                    # print("========t:", t)
                     # print("dual inventory:")
                     for i in range(self.V):
                         for r in range(self.R):
                             dual_inventory[k_state, i, r] = self.inventory_update_constr[t, k_state][i, r].pi
-                            # if abs(dual_inventory[k_state, i, r]) > 1e-6:
+                            # if dual_inventory[k_state, i, r] > 1e-6:
                             #     print(f"{k_state}, {i}, {r} {dual_inventory[k_state, i, r]}")
                     # print("dual capacity:")
                     for i in range(self.V):
@@ -713,9 +715,8 @@ class MultiStageSPModel:
                             for r in range(self.R):
                                 lam = dual_inventory[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                 cutcoef_I[i, r] += lam                                          # Coefficient
-                                # cut_rhs += lam * I_prev[i, r]                                   # RHS
-                                mult = -1 if i in self.V0 or i in self.V2 else 1
-                                cut_rhs += mult * lam * I_prev[i, r]
+                                cut_rhs -= lam * I_prev[i, r]                                   # RHS
+                                
 
                         # Flow capacity constraints
                         for i in range(self.V):
@@ -723,14 +724,13 @@ class MultiStageSPModel:
                                 if (i, j) in self.A:
                                     lam = dual_capacity[k_state, i, j] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                     # Coefficient multiplies fixed parameter K_ijt, so only RHS:
-                                    cut_rhs += lam * self.K_ijt[i][j][t-1]
+                                    cut_rhs -= lam * self.K_ijt[i][j][t-1]
 
                 # Build the left-hand-side linear expression
                 lhs_expr  = self.theta[t-1, n]
-                lhs_expr += -gp.quicksum(cutcoef_U[i] * self.U[t-1, n][i] for i in range(self.V))
-                # lhs_expr += -gp.quicksum(cutcoef_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
-                lhs_expr += -gp.quicksum((-1 if i in self.V0 or i in self.V2 else 1) * cutcoef_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
-
+                lhs_expr += gp.quicksum(cutcoef_U[i] * self.U[t-1, n][i] for i in range(self.V))
+                lhs_expr += -gp.quicksum(cutcoef_I[i, r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
+                
                 # if t == self.t_L - 1:
                 #     print(f"stage{t} cut")
                 #     print("cutcoef_U = ")
@@ -756,7 +756,7 @@ class MultiStageSPModel:
                     #             print(f"{i}, {cutcoef_I[i,r]}")
                 # exit(0)
                 # Add the cut
-                self.models[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}_{iter}")
+                self.models[t-1, n].addConstr(lhs_expr >= Qvalue + cut_rhs, name=f"OptCut_{t-1}_{n}_{iter}")
 
         return cutviolFlag
     

@@ -46,6 +46,7 @@ def termination_check(iter, relative_gap, LB, start, cutviol_iter, params):
     else:
         if iter > params["STALL"]:
             relative_gap = (LB[iter-1]-LB[iter-1-params["STALL"]])/max(1e-10,abs(LB[iter-1-params["STALL"]]))
+            # print(f"Stall check: LB[iter-1] = {LB[iter-1]:.6f}, LB[iter-1-{params['STALL']}] = {LB[iter-1 - params['STALL']]:.6f}, relative_gap = {relative_gap:.6e}")
             if relative_gap < params["CUTVIOL"]:
                 flag = 4
                 print("the LB is not making significant progress")
