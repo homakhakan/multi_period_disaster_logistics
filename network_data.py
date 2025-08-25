@@ -21,6 +21,7 @@ class NetworkData:
         self.df_V = pd.read_excel(self.file_paths["location_file"])
         self.df_R = pd.read_excel(self.file_paths["resource_file"])
         self.df_K = pd.read_excel(self.file_paths["arc_capacity_file"])
+        # print(self.df_R)
 
         # Load matrices
         self.durationMatrix = np.loadtxt(self.file_paths["duration_matrix_file"])
@@ -52,7 +53,7 @@ class NetworkData:
     
         self.file_paths = {
             "location_file": f"Data/Set V_locations_{self.instance_version}.xlsx",
-            "resource_file": f"Data/Set R_resources_{self.instance_version}.xlsx",
+            "resource_file": f"Data/Set R_resources_debugging.xlsx",
             "duration_matrix_file": f"Data/Duration_all_nodes_{self.instance_version}.txt",
             "distance_matrix_file": f"Data/Distance_all_nodes_{self.instance_version}.txt",
             "arc_capacity_file": f"Data/Arc_capacity_{self.instance_version}.xlsx",
@@ -131,12 +132,16 @@ class NetworkData:
 
         # Initialize inventory list
         selected_columns = self.params["INVENTORY_COLUMNS"][self.instance_version]
+
         
         Inv = []
         for i in range(len(self.df_V)):
             Inv.extend([self.df_V[col][i] for col in selected_columns])
 
         self.R = len(selected_columns)  # Number of resources
+        print(self.R)
+        print(selected_columns)
+        
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
 
         # Penalty costs per location
@@ -174,15 +179,19 @@ class NetworkData:
             if i in idx:
                 water_pc = float(self.df_V.at[i, 'Water PC'])
                 food_pc = float(self.df_V.at[i, 'Food PC'])
-                self.cost_ir.append([water_pc, food_pc, 0, 0])
+                # self.cost_ir.append([water_pc, food_pc, 0, 0])
+                self.cost_ir.append([water_pc])
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
+        print("w_r:", self.w_r)
 
         
         # Factor of pallet required per commodity r
         self.g_shelter = self.df_R['pallet per S-Kit'].tolist()
         self.g_pod = self.df_R['pallet per P-Kit'].tolist()
+        print("g_shelter:", self.g_shelter)
+        print("g_pod:", self.g_pod)
 
         # Initialize K_ijt
         self.multiplier3 = float(self.params["MULTIPLIER3"])  # Scaling factor

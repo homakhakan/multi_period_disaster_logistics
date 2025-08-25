@@ -7,13 +7,10 @@ FUEL_COST_PER_MILE: 0.1
 
 
 INVENTORY_COLUMNS:
-  original: ["S-Kit StartInv", "P-Kit StartInv", "Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
+  original: ["Water StartInv"]
   largesize: ["Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
   smallsize: ["Water StartInv"]
   mediumsize: ["Water StartInv", "Blanket StartInv"]
-
-
-
 
 
 # Normal distribution params related to distributing total PoD demand 
@@ -33,7 +30,7 @@ EPS: 1e-5
 smallest_trans_prob: 0.0005
 CUTVIOL: 0.00001
 MAX_ITER: 10
-STALL: 200
+STALL: 500
 CUTVIOL_MAXITER: 100000
 TIME_LIMIT: 10800
 LOWER_BOUND: 1e10

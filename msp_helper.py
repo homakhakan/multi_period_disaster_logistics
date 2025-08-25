@@ -2,6 +2,7 @@ import json
 import numpy as np
 import pandas as pd
 import time
+np.random.seed(42)
 
 def load_transition_dict(path):
     with open(path, "r") as f:
@@ -15,16 +16,17 @@ def build_node_lists(transition_dict):
 
 def MC_sample(t, current_state, transition_dict):
     """ Draw one next state given current time t and current_state """
-    
+
+    # Convert keys to strings
     t_key     = str(t)
     state_key = str(current_state)
-
+    # Get all possible transitions
     probs_dict = transition_dict[t_key][state_key]
+    # Extract valid next states and probabilities
     states_str = [s for s, p in probs_dict.items() if p > 0]
     weights    = [p for s, p in probs_dict.items() if p > 0]
-
-    states = [eval(s) for s in states_str]
-    idx    = np.random.choice(len(states), p=weights)
+    states = [eval(s) for s in states_str] # Convert state strings to tuples
+    idx    = np.random.choice(len(states), p=weights) # Randomly sample next state
     return states[idx]
 
 def termination_check(iter, relative_gap, LB, start, cutviol_iter, params):
