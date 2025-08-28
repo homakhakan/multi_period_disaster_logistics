@@ -2,7 +2,7 @@ import json
 import numpy as np
 import pandas as pd
 import time
-np.random.seed(42)
+np.random.seed()
 
 def load_transition_dict(path):
     with open(path, "r") as f:
@@ -28,6 +28,38 @@ def MC_sample(t, current_state, transition_dict):
     states = [eval(s) for s in states_str] # Convert state strings to tuples
     idx    = np.random.choice(len(states), p=weights) # Randomly sample next state
     return states[idx]
+
+def create_OSpaths(nbOS, T_Bef, k_init, transition_dict, output_file):
+    """
+    Create out-of-sample (OOS) paths using Markov transitions.
+    """
+    rr = nbOS
+    cc = len(T_Bef)
+    print("rr = ", rr)
+    print("cc = ", cc)
+
+    # Initialize OS_paths as object array since we store tuples
+    OS_paths = np.full((rr, cc), None, dtype=object)
+
+    # Set initial state for all sample paths
+    for s in range(rr):
+        OS_paths[s, 0] = k_init
+
+    # Generate paths using MC_sample
+    for s in range(rr):
+        k_t = k_init
+        for t in range(len(T_Bef)):
+            if t > 0:
+                k_t = MC_sample(t-1, k_t, transition_dict)
+                OS_paths[s, t] = k_t
+
+    # Save as CSV with tuple strings
+    df = pd.DataFrame(OS_paths)
+    df.to_csv(output_file, index=False)
+
+    print(f"[INFO] Generated OOS paths saved to: {output_file}")
+    print(f"Shape = {OS_paths.shape}")
+    return OS_paths
 
 def termination_check(iter, relative_gap, LB, start, cutviol_iter, params):
     flag = 0

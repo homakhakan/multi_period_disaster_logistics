@@ -44,7 +44,8 @@ if __name__ == "__main__":
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
-    parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation after solving extended model")
+    parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation for 2SSP after solving extended model")
+    # parser.add_argument("-seos", "--sddp_eval_oos", action="store_true", help="Run out-of-sample evaluation after solving the SDDP model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5, 6], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel), 6.multi-stage (SDDP)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = Using fixed arc capacity, 2 = with vehicle routing decisions")
     parser.add_argument("-tt", "--travel_time", type=int, choices=[1, 2], help="Travel-time mode: 1. All arcs take 1 period to travel, 2. Some arcs might take more than 1 period to travel")
@@ -91,7 +92,7 @@ if __name__ == "__main__":
 
     # ---------- Simulated In-Sample Demand Setup for static 2SSP-----------
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
-    print("\nGenerating in-sample demand...")
+    # print("\nGenerating in-sample demand...")
     demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/Distance_podtoshelter.xlsx", network_processor=network_processor)
     
     if args.solution_method != 6:
@@ -313,6 +314,7 @@ if __name__ == "__main__":
 
     elif args.solution_method == 6:
         from multistage_model import MultiStageSPModel 
+        from msp_helper import create_OSpaths
         import cProfile
         import pstats
 
@@ -322,8 +324,25 @@ if __name__ == "__main__":
         # === PROFILING START ===
         # profiler = cProfile.Profile()
         # profiler.enable()
+        
+        # # Path where we save or load OOS paths
+        # sample_paths_file = "Data/real_OOS_paths.csv"
+
+        # # === STEP 1: CREATE OOS PATHS (ONLY FIRST TIME) ===
+        # if not os.path.exists(sample_paths_file):
+        #     print(f"[INFO] OOS paths file not found. Generating {demand_processor.nbOS} sample paths...")
+        #     create_OSpaths(
+        #         nbOS=demand_processor.nbOS,
+        #         T_Bef=network_processor.T_Bef,
+        #         k_init=sddp_model_instance.nodeLists[0][0],
+        #         transition_dict=sddp_model_instance.transition_dict,
+        #         output_file=sample_paths_file)
+        # else:
+        #     print(f"[INFO] Using existing OOS paths file: {sample_paths_file}")
+        # exit(0)
 
         # Run the SDDP algorithm
+        print(f"\n SDDP Training in process ...")
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
 
 
@@ -333,9 +352,21 @@ if __name__ == "__main__":
 
         # === PROFILING END ===
 
-        print(f"\n✅ SDDP Training Complete")
-        print(f"   Iterations: {total_iter}")
-        print(f"   Total Time: {train_time:.2f} seconds")
-        print("   Lower Bound Progression:", [round(val, 2) for val in LB])
+        print(f"\n SDDP Training Complete")
+        print(f"Iterations: {total_iter}")
+        print(f"Training Time: {train_time:.2f} seconds")
+        print(f"Final LB: {LB[-1]:.2f}")
+
+        # Run OOS Evaluation for SDDP 
+        print("\n Starting SDDP Out-of-Sample Evaluation...")
+        sample_paths_file = "Data/real_OOS_paths.csv"
+
+        results = sddp_model_instance.sddp_eval(sample_paths_file, demand_processor)
+
+        mean_obj, CI, test_time = results
+        print(f"\n SDDP Evaluation Results")
+        print(f"Mean Objective: {mean_obj:.2f}")
+        print(f"95% CI Half-Width: ±{CI:.2f}")
+        print(f"Evaluation Time: {test_time:.2f} sec")
 
 

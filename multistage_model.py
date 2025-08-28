@@ -7,6 +7,7 @@ import time
 from openpyxl import load_workbook
 import os
 import sys
+import matplotlib.pyplot as plt
 
 class MultiStageSPModel:
     def __init__(self, network_processor, demand_processor, params, travel_time):
@@ -301,6 +302,7 @@ class MultiStageSPModel:
 
     def forward_pass(self):
 
+        objs = np.zeros(len(self.T_Bef))
         k_t = self.nodeLists[0][0]      # First state at t=0
         state_path = [k_t]              # Keep track of visited states
         # Initialize the state variables from t=0
@@ -320,14 +322,15 @@ class MultiStageSPModel:
                 elif self.travel_time == 2:
                     self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
             self.m[t, k_t].optimize() # Optimize the model
+            objs[t] = self.m[t,k_t].ObjVal - self.theta[t,k_t].x
 
             # print(f"\n--- Debug: Decision Variables at t={t}, k_t={k_t} ---")
-            # print(f"Objective Value: {model.ObjVal:.2f}")
+            # print(f"Objective Value: {self.m[t, k_t].ObjVal:.2f}")
 
-            # f: shipment flow
-            for (i, j, r), var in self.f[t, k_t].items():
-                if var.X > 1e-6:
-                    print(f"  f[{i},{j},{r}] = {var.X:.2f}")
+            # # f: shipment flow
+            # for (i, j, r), var in self.f[t, k_t].items():
+            #     if var.X > 1e-6:
+            #         print(f"  f[{i},{j},{r}] = {var.X:.2f}")
 
             # # I: inventory
             # for (i, r), var in self.I[t, k_t].items():
@@ -339,10 +342,10 @@ class MultiStageSPModel:
             #     if var.X > 1e-6:
             #         print(f"  U[{i}] = {var.X:.2f}")
 
-            # S: satisfied demand
-            for i, var in self.S[t, k_t].items():
-                if var.X > 1e-6:
-                    print(f"  S[{i}] = {var.X:.2f}")
+            # # S: satisfied demand
+            # for i, var in self.S[t, k_t].items():
+            #     if var.X > 1e-6:
+            #         print(f"  S[{i}] = {var.X:.2f}")
 
             # # Theta (if exists)
             # theta_var = self.theta[t, k_t]
@@ -395,7 +398,7 @@ class MultiStageSPModel:
 
                 if t == 0:
                     lb = self.m[t, k_t].objVal               
-        # print("state_path:", state_path)
+        print("obj=", np.sum(objs))
         if self.travel_time == 1:
             return I_prev, U_prev, thetaval, lb, state_path
         elif self.travel_time == 2:
@@ -757,12 +760,12 @@ class MultiStageSPModel:
                                 cutcoef_I2[i][r] += lam                                          # Coefficient
                                 cut_rhs += lam * I_prev[i][r][t-1]                                    # RHS
 
-                # Build the left-hand-side linear expression
-                lhs_expr  = self.theta[t-1, n]
-                lhs_expr -= gp.quicksum(cutcoef_U1[i] * self.U[t-1, n][i] for i in range(self.V))
-                lhs_expr -= gp.quicksum(cutcoef_U2[i] * self.U[t-1, n][i] for i in range(self.V))
-                lhs_expr -= gp.quicksum(cutcoef_I1[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
-                lhs_expr -= gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
+                        # # Build the left-hand-side linear expression
+                        # lhs_expr  = self.theta[t-1, n]
+                        # lhs_expr -= gp.quicksum(cutcoef_U1[i] * self.U[t-1, n][i] for i in range(self.V))
+                        # lhs_expr -= gp.quicksum(cutcoef_U2[i] * self.U[t-1, n][i] for i in range(self.V))
+                        # lhs_expr -= gp.quicksum(cutcoef_I1[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
+                        # lhs_expr -= gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
                 
                 # if t == self.t_L - 1:
                 #     print(f"stage{t} cut")
@@ -789,9 +792,16 @@ class MultiStageSPModel:
                     #             print(f"{i}, {cutcoef_I[i,r]}")
                 # exit(0)
                 # Add the cut
-                self.m[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
+                # self.m[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
+                 
+                self.m[t-1, n].addConstr(self.theta[t-1, n]
+                                        - gp.quicksum(cutcoef_U1[i] * self.U[t-1, n][i] for i in range(self.V)) 
+                                        - gp.quicksum(cutcoef_U2[i] * self.U[t-1, n][i] for i in range(self.V))
+                                        - gp.quicksum(cutcoef_I1[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
+                                        - gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R)) 
+                                        >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
                 # write the lp file
-                # if t - 1 == 0:  
+                # if t - 1 == 1:  
                 #     self.m[t-1, n].write(f"LP/stage{t-1}_state{n}.lp")
 
                
@@ -850,7 +860,7 @@ class MultiStageSPModel:
                 cut_violFlag = self.backward_pass(I_prev, U_prev, f_prev, thetaval, state_path)
 
             # Print outputs for debugging
-            print(f"Iteration {iter:>2} | LB: {lb:.2f} | Cut Violated: {cut_violFlag}")
+            # print(f"Iteration {iter:>2} | LB: {lb:.2f} | Cut Violated: {cut_violFlag}")
 
             # cut-violation
             if cut_violFlag:
@@ -863,7 +873,65 @@ class MultiStageSPModel:
         # for key, val in self.timer_stats.items():
         #     print(f"{key:<30}: {val:.4f} sec")
 
+        # # Plot LB progression
+        # plt.figure(figsize=(8, 5))
+        # plt.plot(range(1, len(LB) + 1), LB, marker='o', linestyle='-', linewidth=2)
+        # plt.xlabel("Iteration", fontsize=12)
+        # plt.ylabel("Lower Bound (LB)", fontsize=12)
+        # plt.title("LB Progression Over Iterations", fontsize=14)
+        # plt.grid(True)
+        # plt.tight_layout()
+        # plt.show()
+
         return LB, train_time, iter
+    
+    # Evaluate model
+    def sddp_eval(self, sample_paths_file, demand_processor):
+        
+        nbOS = demand_processor.nbOS
+
+        # Load all sample paths from CSV
+        OS_paths_df = pd.read_csv(sample_paths_file)
+        OS_paths = OS_paths_df.values[:nbOS] # Converts the DataFrame into a NumPy array
+
+        objs = np.zeros((nbOS, len(self.T_Bef)))
+
+        start = time.time()
+
+        for s in range(nbOS):
+            I_prev = np.zeros((self.V, self.R, len(self.T_Bef)))
+            U_prev = np.zeros((self.V, len(self.T_Bef)))
+            if self.travel_time == 2:
+                f_prev = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(len(self.T_Bef))}
+            for t in range(len(self.T_Bef)):
+                k_t = eval(OS_paths[s, t]) 
+                if t > 0:
+                    if self.travel_time == 1:
+                        self.mspFP_update_rhs_time1(t, k_t, I_prev, U_prev)
+                    elif self.travel_time == 2:
+                        self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev)                
+                self.m[t, k_t].optimize()
+                if self.m[t, k_t].status != GRB.OPTIMAL:
+                    print(" in evaluation")
+                    print(f"Model in stage = {t} and state = {k_t}, in forward pass is {self.m[t,k_t].status}")
+                    exit(0)
+                else:
+                    objs[s, t] = self.m[t,k_t].ObjVal - self.theta[t,k_t].x
+                    for i in range(self.V):
+                        for r in range(self.R):
+                            I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
+                        U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
+
+        mean_obj = np.mean(np.sum(objs, axis=1))
+        std_obj = np.std(np.sum(objs, axis=1))
+        ci_low = mean_obj - 1.96 * std_obj / np.sqrt(nbOS)
+        ci_high = mean_obj + 1.96 * std_obj / np.sqrt(nbOS)
+        CI = mean_obj - ci_low
+        print(f"μ ± 1.96*σ/√NS = {mean_obj} ± {CI}")
+        print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
+        test_time = time.time() - start
+
+        return [mean_obj, CI, test_time]
 
 
     

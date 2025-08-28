@@ -139,8 +139,8 @@ class NetworkData:
             Inv.extend([self.df_V[col][i] for col in selected_columns])
 
         self.R = len(selected_columns)  # Number of resources
-        print(self.R)
-        print(selected_columns)
+        # print(self.R)
+        # print(selected_columns)
         
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
 
@@ -184,14 +184,14 @@ class NetworkData:
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
-        print("w_r:", self.w_r)
+        # print("w_r:", self.w_r)
 
         
         # Factor of pallet required per commodity r
         self.g_shelter = self.df_R['pallet per S-Kit'].tolist()
         self.g_pod = self.df_R['pallet per P-Kit'].tolist()
-        print("g_shelter:", self.g_shelter)
-        print("g_pod:", self.g_pod)
+        # print("g_shelter:", self.g_shelter)
+        # print("g_pod:", self.g_pod)
 
         # Initialize K_ijt
         self.multiplier3 = float(self.params["MULTIPLIER3"])  # Scaling factor
