@@ -39,7 +39,7 @@ class MultiStageSPModel:
         self.cost_ir = network_processor.cost_ir
         self.m_ij = network_processor.m_ij
         self.T = network_processor.T
-        self.T_Bef = network_processor.T_Bef
+        self.T1 = network_processor.T1
         self.t_ijt = network_processor.t_ijt
         self.t_L = network_processor.t_L 
 
@@ -47,7 +47,7 @@ class MultiStageSPModel:
         if self.travel_time == 2:
             self.delta = []
             for (i, j) in self.A:
-                for t in range(len(self.T_Bef)):
+                for t in range(self.T1):
                     t_prime = t - self.t_ijt[i][j] - 1
                     if 0 <= t_prime:             
                         self.delta.append((i, j, t, t_prime))
@@ -195,10 +195,6 @@ class MultiStageSPModel:
             for j in range(self.V):
                 if (i, j) in self.A:
                     cap_ij_t = self.K_ijt[i][j][t]
-                    # # Debugging
-                    # if cap_ij_t > 1e-6:  # Only print nonzero capacities
-                    #     print(f"Cap[{i},{j},{t}] = {cap_ij_t}")
-                    # print("w_r     =", self.w_r)
                     flow_capacity_constr[i, j] = m.addConstr(gp.quicksum(self.w_r[r] * f[i, j, r] for r in range(self.R)) <= cap_ij_t, name=f"FlowCapacity_{i}_{j}_{t}")
 
         if self.travel_time == 2:
@@ -266,7 +262,7 @@ class MultiStageSPModel:
             self.in_transit_update_constr = {}
 
         # Loop over pre-landfall stochastic stages (t = 0 … 9)
-        for t in range(len(self.T_Bef)):
+        for t in range(self.T1):
             for k in self.nodeLists[t]: # Every reachable Markov state at time t
                 if self.travel_time == 1:
                     (
@@ -302,18 +298,18 @@ class MultiStageSPModel:
 
     def forward_pass(self):
 
-        objs = np.zeros(len(self.T_Bef))
         k_t = self.nodeLists[0][0]      # First state at t=0
         state_path = [k_t]              # Keep track of visited states
         # Initialize the state variables from t=0
-        I_prev = np.zeros((self.V, self.R, len(self.T_Bef)))
-        U_prev = np.zeros((self.V, len(self.T_Bef)))
+        # Note that we need to define and record these for each stage as well, that's why we have an additional t index
+        I_prev = np.zeros((self.V, self.R, self.T1))
+        U_prev = np.zeros((self.V, self.T1))
         if self.travel_time == 2:
-            f_prev = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(len(self.T_Bef))} # No past flows exist before t=1
-        thetaval = [0] * len(self.T_Bef)     # Stores theta values (cost-to-go)
+            f_prev = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(self.T1)} # No past flows exist before t=1
+        thetaval = [0] * self.T1     # Stores theta values (cost-to-go)
         lb = self.lower_bound
 
-        for t in range(len(self.T_Bef)):
+        for t in range(self.T1):
             if t > 0:
                 k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
                 state_path.append(k_t)          # Keep sample path history
@@ -322,40 +318,6 @@ class MultiStageSPModel:
                 elif self.travel_time == 2:
                     self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f_prev) # Update the right hand side of the constraints
             self.m[t, k_t].optimize() # Optimize the model
-            objs[t] = self.m[t,k_t].ObjVal - self.theta[t,k_t].x
-
-            # print(f"\n--- Debug: Decision Variables at t={t}, k_t={k_t} ---")
-            # print(f"Objective Value: {self.m[t, k_t].ObjVal:.2f}")
-
-            # # f: shipment flow
-            # for (i, j, r), var in self.f[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  f[{i},{j},{r}] = {var.X:.2f}")
-
-            # # I: inventory
-            # for (i, r), var in self.I[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  I[{i},{r}] = {var.X:.2f}")
-
-            # # U: unmet demand
-            # for i, var in self.U[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  U[{i}] = {var.X:.2f}")
-
-            # # S: satisfied demand
-            # for i, var in self.S[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  S[{i}] = {var.X:.2f}")
-
-            # # Theta (if exists)
-            # theta_var = self.theta[t, k_t]
-            # if theta_var is not None and theta_var.X > 1e-6:
-            #     print(f"\nTheta = {theta_var.X:.2f}")
-
-            # # f1: in-transit flow       
-            # for (i, j, r, t_prime), var in self.f1[t, k_t].items():
-            #     if var.X > 1e-6:
-            #         print(f"  f1[{i},{j},{r},{t_prime}] = {var.X:.2f}")
 
             # Check for the optimality and then extract the solution for updating state variables
             if self.m[t, k_t].status != GRB.OPTIMAL:
@@ -368,14 +330,9 @@ class MultiStageSPModel:
                         I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
                     U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
 
-                # print(f"Stage {t} - Nonzero Inventory Levels:") # Debugging
-                # for (i, r), value in I_prev.items():
-                #     if value > 1e-6:
-                #         print(f"  Location {i}, Resource {r} → Inventory: {value:.2f}")
-
                 if self.travel_time == 2:
                     # Extract the new in-transit flow for next stage
-                    f_current = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(len(self.T_Bef))}
+                    f_current = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(self.T1)}
                     # Carry forward earlier shipments t' < t that have NOT arrived
                     for (i, j) in self.A:
                         for r in range(self.R):
@@ -393,12 +350,9 @@ class MultiStageSPModel:
 
                 thetaval[t] = self.theta[t, k_t].x
 
-                # Debugging
-                # print(f"Forward pass | t={t} | visited state = {k_t} | theta = {thetaval[t]:.2f}")
-
                 if t == 0:
                     lb = self.m[t, k_t].objVal               
-        print("obj=", np.sum(objs))
+
         if self.travel_time == 1:
             return I_prev, U_prev, thetaval, lb, state_path
         elif self.travel_time == 2:
@@ -493,21 +447,11 @@ class MultiStageSPModel:
             self.demand_shortage_constr1[t, k_t][i].setAttr(GRB.Attr.RHS, U_prev[i, t - 1] + demand_real[i])
             self.demand_shortage_constr2[t, k_t][i].setAttr(GRB.Attr.RHS, U_prev[i, t - 1] + demand_real[i])
 
-            # # Print for debugging
-            # if abs(demand_real[i]) > 1e-6:
-            #     print(f"stage {t}, state {k_t}, location {i}: demand_real = {demand_real[i]}")
-            # if abs(U_prev[(i, t-1)]) > 1e-6:
-            #     print(f"stage {t}, state {k_t}, location {i}: U_prev = {U_prev[(i, t-1)]}")
-
         # Inventory flow-balance rhs
         for i in range(self.V):
             for r in range(self.R):
                 self.inventory_update_constr1[t, k_t][i, r].setAttr(GRB.Attr.RHS, I_prev[i, r, t - 1])
                 self.inventory_update_constr2[t, k_t][i, r].setAttr(GRB.Attr.RHS, I_prev[i, r, t - 1])
-            
-            # if abs(I_prev[(i, r)]) > 1e-6:
-            #     print(f"stage {t}, state {k_t}, location {i}, : inventory = {I_prev[(i, r)]}")
-
 
     # def backward_pass(self, I_prev, U_prev, f_prev, thetaval, state_path):
         
@@ -645,7 +589,7 @@ class MultiStageSPModel:
         cutviolFlag = False
 
         for t in range(len(state_path)-1, 0, -1):
-            # print("t=", t)
+
             Q = {}  # Use dictionary to store: key = Markov state (tuple), value = objVal
             # List for all the dual multipliers of the constraints
             dual_demand1    = {}  # (k,i)     
@@ -654,8 +598,7 @@ class MultiStageSPModel:
             dual_inventory2 = {}  # (k,i,r)                   
 
             sample_state = state_path[t - 1]  # The state observed at time t-1
-            # print("sample_state:", sample_state)
-            # print("list of nodes t:", self.nodeLists[t]) # List of all possible states at stage t
+
             for k_state in self.nodeLists[t]:
                 self.mspFP_update_rhs_time1(t, k_state, I_prev, U_prev)
                 self.m[t, k_state].optimize()
@@ -665,9 +608,7 @@ class MultiStageSPModel:
                     sys.exit(0)
                 else:
                     Q[k_state] = self.m[t, k_state].objVal    # Save the objective value for this (t , k_state)
-                    # print("Q=", Q[k_state])
-                    # Extract dual values for each constraint set
-                    # print("dual demand:")
+ 
                     for i in range(self.V):
                         dual_demand1[k_state, i] = self.demand_shortage_constr1[t, k_state][i].pi # <= 0 negative
                         if dual_demand1[k_state, i] > 1e-6:
@@ -684,38 +625,21 @@ class MultiStageSPModel:
                             dual_inventory1[k_state, i, r] = self.inventory_update_constr1[t, k_state][i, r].pi # <= 0 negative
                             if dual_inventory1[k_state, i, r] > 1e-6:
                                 print(f"Error in dual_inventory1 sign: dual = {dual_inventory1[k_state, i, r]}")
-                                # print(f"{k_state}, {i}, {r} {dual_inventory1[k_state, i, r]}")
 
                     for i in range(self.V):
                         for r in range(self.R):
                             dual_inventory2[k_state, i, r] = self.inventory_update_constr2[t, k_state][i, r].pi # >= 0 positive
                             if dual_inventory2[k_state, i, r] < -1e-6:
                                 print(f"Error in dual_inventory2 sign: dual = {dual_inventory2[k_state, i, r]}")
-                                # print(f"{k_state}, {i}, {r} {dual_inventory2[k_state, i, r]}")
-
-            
-                # exit(0)
-                # # Print only for the current sample path node
-                # if k_state == state_path[t]:
-                #     print(f"\n[Stage {t}] Dual demand for node {k_state} (sample path):")
-                #     for i in range(self.V):
-                #         for r in range(self.R):
-                #             val = dual_inventory[k_state, i, r]
-                #             if abs(val) > 1e-6:
-                #                 print(f"  Location {i}, Resource {r}: Dual = {val:.4f}")
 
             # Solving all stage-(t-1) problems and generate cuts/valid inequalities
             for n in self.nodeLists[t - 1]:
-                # print("t-1=", t - 1)
-                # print("n:", n)
-                # print("list of nodes t-1:", self.nodeLists[t - 1])
-                # exit(0)
                 Qvalue = 0
                 for k_state in self.nodeLists[t]:
-                    # print(k_state)
                     # Accumulate expected cost-to-go from all reachable next-stage states with non-negligible transition probability
                     if self.transition_dict[str(t-1)][str(n)][str(k_state)] > self.smallest_trans_prob:
                         Qvalue += Q[k_state] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
+
                 # Check if cut is violated at the sample path encountered in the forward pass (Only interested in checking cut violation on the same node as the forward pass)
                 # n  : current state at stage t-1
                 # sample_state : state that was actually visited in the forward pass
@@ -723,8 +647,7 @@ class MultiStageSPModel:
                         (Qvalue - thetaval[t - 1]) / max(1e-10, abs(thetaval[t - 1])) > self.cutviol 
                         and abs(Qvalue - thetaval[t - 1]) > self.cutviol
                 ):
-                    cutviolFlag = True
-                    # print(f"t={t}, n={n}, Qvalue={Qvalue:.2f}, theta={thetaval[t-1]:.2f}, Δ={(Qvalue - thetaval[t - 1]):.2f}")
+                    cutviolFlag = True # Note that if this is True we generate the cut not only for this state, but also for all other states at the relevant state.
 
                 # Initialize coeff-dictionaries for each state variable
                 cutcoef_U1 = [0] * self.V
@@ -735,75 +658,40 @@ class MultiStageSPModel:
 
                 for k_state in self.nodeLists[t]:
                     if self.transition_dict[str(t-1)][str(n)][str(k_state)] > self.smallest_trans_prob:
-
+                        
+                        # No matter what are the sign of dual variables, we "add" them for the coefficients and the rhs both. 
                         # Demand-shortage constraints
                         for i in range(self.V):
-                            lam = dual_demand1[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)] # negative
+                            lam = dual_demand1[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)] 
                             cutcoef_U1[i] += lam                                                 # Coefficient
                             cut_rhs += lam * U_prev[i][t-1]                                          # RHS
 
                         for i in range(self.V):
-                            lam = dual_demand2[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)] # positive
+                            lam = dual_demand2[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                             cutcoef_U2[i] += lam                                                 # Coefficient
                             cut_rhs += lam * U_prev[i][t-1]                                           # RHS
 
                         # Inventory-balance constraints
                         for i in range(self.V):
                             for r in range(self.R):
-                                lam = dual_inventory1[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)] # negative
+                                lam = dual_inventory1[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                 cutcoef_I1[i][r] += lam                                          # Coefficient
                                 cut_rhs += lam * I_prev[i][r][t-1]                                   # RHS
 
                         for i in range(self.V):
                             for r in range(self.R):
-                                lam = dual_inventory2[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)] # positive
+                                lam = dual_inventory2[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                 cutcoef_I2[i][r] += lam                                          # Coefficient
                                 cut_rhs += lam * I_prev[i][r][t-1]                                    # RHS
-
-                        # # Build the left-hand-side linear expression
-                        # lhs_expr  = self.theta[t-1, n]
-                        # lhs_expr -= gp.quicksum(cutcoef_U1[i] * self.U[t-1, n][i] for i in range(self.V))
-                        # lhs_expr -= gp.quicksum(cutcoef_U2[i] * self.U[t-1, n][i] for i in range(self.V))
-                        # lhs_expr -= gp.quicksum(cutcoef_I1[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
-                        # lhs_expr -= gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
-                
-                # if t == self.t_L - 1:
-                #     print(f"stage{t} cut")
-                #     print("cutcoef_U = ")
-                #     for i in range(self.V):
-                #         if abs(cutcoef_U[i]) > 1e-6:
-                #             print(f"{i}, {cutcoef_U[i]}")
-                #     print("cutcoef_I = ")
-                #     for i in range(self.V):
-                #         for r in range(self.R):
-                #             if abs(cutcoef_I[i, r]) > 1e-6:
-                #                 print(f"{i}, {cutcoef_I[i,r]}")
-                
-                # if t == self.t_L:
-                    # print(f"stage{t} cut")
-                    # print("cutcoef_U = ")
-                    # for i in range(self.V):
-                    #     if abs(cutcoef_U[i]) > 1e-6:
-                    #         print(f"{i}, {cutcoef_U[i]}")
-                    # print("cutcoef_I = ")
-                    # for i in range(self.V):
-                    #     for r in range(self.R):
-                    #         if abs(cutcoef_I[i, r]) > 1e-6:
-                    #             print(f"{i}, {cutcoef_I[i,r]}")
-                # exit(0)
+              
                 # Add the cut
-                # self.m[t-1, n].addConstr(lhs_expr >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
-                 
+                # Pay attention to the signs of the terms on the left ahdn side and sign of cut_rhs on thr right hand side          
                 self.m[t-1, n].addConstr(self.theta[t-1, n]
                                         - gp.quicksum(cutcoef_U1[i] * self.U[t-1, n][i] for i in range(self.V)) 
                                         - gp.quicksum(cutcoef_U2[i] * self.U[t-1, n][i] for i in range(self.V))
                                         - gp.quicksum(cutcoef_I1[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
                                         - gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R)) 
                                         >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
-                # write the lp file
-                # if t - 1 == 1:  
-                #     self.m[t-1, n].write(f"LP/stage{t-1}_state{n}.lp")
-
                
         return cutviolFlag
     
@@ -828,10 +716,8 @@ class MultiStageSPModel:
         train_time = 0
         relative_gap = self.rel_gap
         lb = 0
-        LB = []          # lower-bound history 
-        I_prev = [[[0 for _ in range(len(self.T_Bef))] for _ in range(self.R)] for _ in range(self.V)]
-        U_prev = [[0 for _ in range(len(self.T_Bef))] for _ in range(self.V)]
-        thetaval = [0] * len(self.T_Bef)
+        LB = []  # lower-bound history 
+        thetaval = [0] * self.T1
         iter = 0
         cutviol_iter = 0
         start = time.time()
@@ -859,29 +745,11 @@ class MultiStageSPModel:
             elif self.travel_time == 2:
                 cut_violFlag = self.backward_pass(I_prev, U_prev, f_prev, thetaval, state_path)
 
-            # Print outputs for debugging
-            # print(f"Iteration {iter:>2} | LB: {lb:.2f} | Cut Violated: {cut_violFlag}")
-
             # cut-violation
             if cut_violFlag:
                 cutviol_iter = 0
             else:
                 cutviol_iter += 1
-        
-        # Print for debugging
-        # print("\n====== Final Aggregated Profiling Stats ======")
-        # for key, val in self.timer_stats.items():
-        #     print(f"{key:<30}: {val:.4f} sec")
-
-        # # Plot LB progression
-        # plt.figure(figsize=(8, 5))
-        # plt.plot(range(1, len(LB) + 1), LB, marker='o', linestyle='-', linewidth=2)
-        # plt.xlabel("Iteration", fontsize=12)
-        # plt.ylabel("Lower Bound (LB)", fontsize=12)
-        # plt.title("LB Progression Over Iterations", fontsize=14)
-        # plt.grid(True)
-        # plt.tight_layout()
-        # plt.show()
 
         return LB, train_time, iter
     
@@ -894,16 +762,16 @@ class MultiStageSPModel:
         OS_paths_df = pd.read_csv(sample_paths_file)
         OS_paths = OS_paths_df.values[:nbOS] # Converts the DataFrame into a NumPy array
 
-        objs = np.zeros((nbOS, len(self.T_Bef)))
+        objs = np.zeros((nbOS, self.T1))
 
         start = time.time()
 
         for s in range(nbOS):
-            I_prev = np.zeros((self.V, self.R, len(self.T_Bef)))
-            U_prev = np.zeros((self.V, len(self.T_Bef)))
+            I_prev = np.zeros((self.V, self.R, self.T1))
+            U_prev = np.zeros((self.V, self.T1))
             if self.travel_time == 2:
-                f_prev = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(len(self.T_Bef))}
-            for t in range(len(self.T_Bef)):
+                f_prev = {(i, j, r, t_prime): 0 for (i, j) in self.A for r in range(self.R) for t_prime in range(self.T1)}
+            for t in range(self.T1):
                 k_t = eval(OS_paths[s, t]) 
                 if t > 0:
                     if self.travel_time == 1:
@@ -927,6 +795,7 @@ class MultiStageSPModel:
         ci_low = mean_obj - 1.96 * std_obj / np.sqrt(nbOS)
         ci_high = mean_obj + 1.96 * std_obj / np.sqrt(nbOS)
         CI = mean_obj - ci_low
+        print(f"\nSDDP Evaluation Results")
         print(f"μ ± 1.96*σ/√NS = {mean_obj} ± {CI}")
         print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
         test_time = time.time() - start

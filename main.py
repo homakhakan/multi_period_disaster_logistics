@@ -342,7 +342,7 @@ if __name__ == "__main__":
         # exit(0)
 
         # Run the SDDP algorithm
-        print(f"\n SDDP Training in process ...")
+        print(f"\nSDDP Training in process ...")
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
 
 
@@ -352,21 +352,19 @@ if __name__ == "__main__":
 
         # === PROFILING END ===
 
-        print(f"\n SDDP Training Complete")
+        print(f"\nSDDP Training Complete")
         print(f"Iterations: {total_iter}")
         print(f"Training Time: {train_time:.2f} seconds")
         print(f"Final LB: {LB[-1]:.2f}")
 
         # Run OOS Evaluation for SDDP 
-        print("\n Starting SDDP Out-of-Sample Evaluation...")
+        print("\nStarting SDDP Out-of-Sample Evaluation...")
         sample_paths_file = "Data/real_OOS_paths.csv"
 
         results = sddp_model_instance.sddp_eval(sample_paths_file, demand_processor)
 
         mean_obj, CI, test_time = results
-        print(f"\n SDDP Evaluation Results")
-        print(f"Mean Objective: {mean_obj:.2f}")
-        print(f"95% CI Half-Width: ±{CI:.2f}")
+
         print(f"Evaluation Time: {test_time:.2f} sec")
 
 

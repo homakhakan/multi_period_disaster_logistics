@@ -10,7 +10,8 @@ class NetworkData:
         self.tperiod = int(params["TPERIOD"])
         self.thetaLB = float(params["THETA_LB"])
         self.eps = float(params["EPS"])
-        self.T_BEF = int(params["T_BEF"])
+        self.T1 = int(params["T1"])
+        self.T2 = int(params["T2"])
         self.total_hours = int(params["TOTAL_HOURS"])
         self.fuel_cost_per_mile = float(params["FUEL_COST_PER_MILE"])
 
@@ -21,7 +22,6 @@ class NetworkData:
         self.df_V = pd.read_excel(self.file_paths["location_file"])
         self.df_R = pd.read_excel(self.file_paths["resource_file"])
         self.df_K = pd.read_excel(self.file_paths["arc_capacity_file"])
-        # print(self.df_R)
 
         # Load matrices
         self.durationMatrix = np.loadtxt(self.file_paths["duration_matrix_file"])
@@ -79,12 +79,12 @@ class NetworkData:
             elif location_type == 'PoD':
                 self.V3.append(index)      
 
-        # Time period subsets
-        self.T_Bef = list(range(self.T_BEF))
-        self.T_Aft = list(range(self.T_BEF, self.T))
+        # # Time period subsets
+        self.T_Bef = list(range(self.T1))
+        self.T_Aft = list(range(self.T1, self.T))
 
         # Time of landfall
-        self.t_L = max(self.T_Bef)
+        self.t_L = self.T1 - 1 # Index of landfall
 
         self.A = self.create_arc_set()
 
@@ -139,8 +139,7 @@ class NetworkData:
             Inv.extend([self.df_V[col][i] for col in selected_columns])
 
         self.R = len(selected_columns)  # Number of resources
-        # print(self.R)
-        # print(selected_columns)
+
         
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
 
@@ -184,14 +183,13 @@ class NetworkData:
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
-        # print("w_r:", self.w_r)
+
 
         
         # Factor of pallet required per commodity r
         self.g_shelter = self.df_R['pallet per S-Kit'].tolist()
         self.g_pod = self.df_R['pallet per P-Kit'].tolist()
-        # print("g_shelter:", self.g_shelter)
-        # print("g_pod:", self.g_pod)
+
 
         # Initialize K_ijt
         self.multiplier3 = float(self.params["MULTIPLIER3"])  # Scaling factor
