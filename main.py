@@ -315,42 +315,30 @@ if __name__ == "__main__":
     elif args.solution_method == 6:
         from multistage_model import MultiStageSPModel 
         from msp_helper import create_OSpaths
-        import cProfile
-        import pstats
 
         # Initialize model instance
         sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params, args.travel_time)
-
-        # === PROFILING START ===
-        # profiler = cProfile.Profile()
-        # profiler.enable()
         
-        # # Path where we save or load OOS paths
-        # sample_paths_file = "Data/real_OOS_paths.csv"
+        """
+        # Path where we save or load OOS paths
+        sample_paths_file = "Data/real_OOS_paths.csv"
 
-        # # === STEP 1: CREATE OOS PATHS (ONLY FIRST TIME) ===
-        # if not os.path.exists(sample_paths_file):
-        #     print(f"[INFO] OOS paths file not found. Generating {demand_processor.nbOS} sample paths...")
-        #     create_OSpaths(
-        #         nbOS=demand_processor.nbOS,
-        #         T_Bef=network_processor.T_Bef,
-        #         k_init=sddp_model_instance.nodeLists[0][0],
-        #         transition_dict=sddp_model_instance.transition_dict,
-        #         output_file=sample_paths_file)
-        # else:
-        #     print(f"[INFO] Using existing OOS paths file: {sample_paths_file}")
-        # exit(0)
-
+        # === STEP 1: CREATE OOS PATHS (ONLY FIRST TIME) ===
+        if not os.path.exists(sample_paths_file):
+            print(f"[INFO] OOS paths file not found. Generating {demand_processor.nbOS} sample paths...")
+            create_OSpaths(
+                nbOS=demand_processor.nbOS,
+                T_Bef=network_processor.T_Bef,
+                k_init=sddp_model_instance.nodeLists[0][0],
+                transition_dict=sddp_model_instance.transition_dict,
+                output_file=sample_paths_file)
+        else:
+            print(f"[INFO] Using existing OOS paths file: {sample_paths_file}")
+        exit(0)
+        """
         # Run the SDDP algorithm
         print(f"\nSDDP Training in process ...")
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
-
-
-        # profiler.disable()
-        # stats = pstats.Stats(profiler).sort_stats('cumtime')
-        # stats.print_stats(30)  # Show top 30 time-consuming functions
-
-        # === PROFILING END ===
 
         print(f"\nSDDP Training Complete")
         print(f"Iterations: {total_iter}")
