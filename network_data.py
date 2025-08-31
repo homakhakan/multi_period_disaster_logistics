@@ -49,7 +49,7 @@ class NetworkData:
 
 
     
-    def get_file_paths(self):
+    def get_file_paths(self): # Times in duration matrix is in "seconds"
     
         self.file_paths = {
             "location_file": f"Data/Set V_locations_{self.instance_version}.xlsx",
@@ -159,6 +159,7 @@ class NetworkData:
 
         elif travel_time == 2:
             # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
+            # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
             self.t_ijt = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
 
         #Starting number of trucks at location i (time period 0)
