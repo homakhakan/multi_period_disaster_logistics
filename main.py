@@ -45,7 +45,6 @@ if __name__ == "__main__":
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation for 2SSP after solving extended model")
-    # parser.add_argument("-seos", "--sddp_eval_oos", action="store_true", help="Run out-of-sample evaluation after solving the SDDP model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5, 6], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel), 6.multi-stage (SDDP)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = Using fixed arc capacity, 2 = with vehicle routing decisions")
     parser.add_argument("-tt", "--travel_time", type=int, choices=[1, 2], help="Travel-time mode: 1. All arcs take 1 period to travel, 2. Some arcs might take more than 1 period to travel")

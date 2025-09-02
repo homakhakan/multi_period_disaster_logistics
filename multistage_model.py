@@ -202,14 +202,23 @@ class MultiStageSPModel:
                                                                     + S[i] * g_coeff >= 0, name=f"InventoryUpdate2_{i}_{r}_t{t}") 
 
             # In-transit flow update to the next stage 
-            in_transit_update_constr = {}
+            in_transit_update_constr1 = {}
             for i in range(self.V):
                 for j in range(self.V):
                     if (i, j) in self.A:
                         for r in range(self.R):
                             # t′ < t: Carry forward past flows (to be updated later)
                             for t_prime in range(t):
-                                in_transit_update_constr[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] == 0, name=f"CarryTransit_{i}_{j}_{r}_{t_prime}_to_{t}")
+                                in_transit_update_constr1[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] <= 0, name=f"CarryTransit1_{i}_{j}_{r}_{t_prime}_to_{t}")
+
+            in_transit_update_constr2 = {}
+            for i in range(self.V):
+                for j in range(self.V):
+                    if (i, j) in self.A:
+                        for r in range(self.R):
+                            # t′ < t: Carry forward past flows (to be updated later)
+                            for t_prime in range(t):
+                                in_transit_update_constr2[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] >= 0, name=f"CarryTransit2_{i}_{j}_{r}_{t_prime}_to_{t}")
 
             # In-transit flow initialization at current stage t (t' = t)
             init_in_transit_constr = {}
@@ -241,7 +250,7 @@ class MultiStageSPModel:
             return m, I, U, f, S, theta, demand_shortage_constr1, demand_shortage_constr2, inventory_update_constr1, inventory_update_constr2, flow_capacity_constr
             
         elif self.travel_time == 2:
-            return m, I, U, f, S, f1, theta, demand_shortage_constr1, demand_shortage_constr2, inventory_update_constr1, inventory_update_constr2, flow_capacity_constr, in_transit_update_constr, init_in_transit_constr
+            return m, I, U, f, S, f1, theta, demand_shortage_constr1, demand_shortage_constr2, inventory_update_constr1, inventory_update_constr2, flow_capacity_constr, in_transit_update_constr1, in_transit_update_constr2, init_in_transit_constr
             
     
     def build_models(self):
@@ -274,7 +283,8 @@ class MultiStageSPModel:
             self.inventory_update_constr1 = {}
             self.inventory_update_constr2 = {}
             self.flow_capacity_constr = {}
-            self.in_transit_update_constr = {}
+            self.in_transit_update_constr1 = {}
+            self.in_transit_update_constr2 = {}
             self.init_in_transit_constr = {}
 
         # Loop over pre-landfall stochastic stages (t = 0 … 9)
@@ -308,7 +318,8 @@ class MultiStageSPModel:
                         self.inventory_update_constr1[t, k],
                         self.inventory_update_constr2[t, k],
                         self.flow_capacity_constr[t, k],
-                        self.in_transit_update_constr[t, k],
+                        self.in_transit_update_constr1[t, k],
+                        self.in_transit_update_constr2[t, k],
                         self.init_in_transit_constr[t, k],
                     ) = self.stage_t_state_k_problem(t, k)
 
@@ -324,9 +335,14 @@ class MultiStageSPModel:
         I_prev = np.zeros((self.V, self.R, self.T1))
         U_prev = np.zeros((self.V, self.T1))
         if self.travel_time == 2:
-            # Some of the entries might not be used (cases where t'> t or invalid arcs) but since all are 0, they will be no harm to keep everything consistent.
-            # The last index corresponds to each time stage
-            f1_prev = np.zeros((self.V, self.V, self.R, self.T1, self.T1)) 
+            f1_prev = {}
+            for t in range(self.T1):
+                for i in range(self.V):
+                    for j in range(self.V):
+                        if (i, j) in self.A:
+                            for r in range(self.R):
+                                for t_prime in range(t+1):
+                                    f1_prev[i, j, r, t_prime, t] = 0.0 
 
         thetaval = [0] * self.T1     # Stores theta values (cost-to-go)
         lb = self.lower_bound
@@ -341,7 +357,7 @@ class MultiStageSPModel:
                     self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f1_prev) # Update the right hand side of the constraints
             self.m[t, k_t].optimize() # Optimize the model
 
-            # Debugging
+            # # Debugging
             # print(f"\n--- Stage {t}, State {k_t} ---")
 
             # # Print Inventory (I)
@@ -378,9 +394,9 @@ class MultiStageSPModel:
             #         for j in range(self.V):
             #             if (j, i) in self.A:
             #                 for r in range(self.R):
-            #                     for t_prime in range(t):
+            #                     for t_prime in range(t+1):
             #                         val = self.f1[t, k_t][j, i, r, t_prime].x
-            #                         if val > 1e6:
+            #                         if val > 1e-6:
             #                             print(f"f1[{j},{i},{r},{t_prime}] = {val}")
 
             # # Print Theta
@@ -402,13 +418,25 @@ class MultiStageSPModel:
                         for j in range(self.V):
                             if (i, j) in self.A:
                                 for r in range(self.R):
-                                    for t_prime in range(t):  # Only t′ < t matters
+                                    for t_prime in range(t+1):  # Only t′ < t matters
                                         f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
 
                 thetaval[t] = self.theta[t, k_t].x
 
                 if t == 0:
-                    lb = self.m[t, k_t].objVal               
+                    lb = self.m[t, k_t].objVal     
+
+                # # === DEBUG PRINTS START ===
+                # print(f"\n--- FORWARD PASS DEBUG | Stage t = {t} ---")
+                # print(f"Visited state at t = {t}: {k_t}")
+                # print(f"theta[{t}] = {thetaval[t]}")
+
+                # # Random indices to check (you can change or add more)
+                # i, j, r = 6, 7, 0
+                # print(f"I_prev[{i},{r},{t}] = {I_prev[i, r, t]}")
+                # print(f"U_prev[{i},{t}] = {U_prev[i, t]}")
+                # if self.travel_time == 2 and t > 1:
+                #     print(f"f1_prev[{i},{j},{r},{t-2},{t}] = {f1_prev[i, j, r, t-2, t]}")  # Make sure t-2 >= 0          
 
         if self.travel_time == 1:
             return I_prev, U_prev, thetaval, lb, state_path
@@ -421,8 +449,15 @@ class MultiStageSPModel:
        # Realized demand at stage t, given Markov state k_t
         demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor)
         
+        # print(f"\n--- Demand at stage t = {t}, state = {k_t} ---")
+        # for i in range(self.V):
+        #     if demand_real[i] > 1e-6:
+        #         print(f"Demand at node {i} = {demand_real[i]}")
+
         # Demand shortage rhs
         for i in range(self.V):  # Loop over all locations/nodes
+            # if U_prev[i, t - 1] > 1e-6: 
+            #     print(f"U_prev[{i},{t-1}] = {U_prev[i, t - 1]}")
             self.demand_shortage_constr1[t, k_t][i].setAttr(GRB.Attr.RHS, U_prev[i, t - 1] + demand_real[i])
             self.demand_shortage_constr2[t, k_t][i].setAttr(GRB.Attr.RHS, U_prev[i, t - 1] + demand_real[i])
 
@@ -431,6 +466,11 @@ class MultiStageSPModel:
         for i in range(self.V):
             for r in range(self.R):         
                 rhs_val = I_prev[i, r, t - 1] + sum(f1_prev[j, i, r, t_prime, t - 1] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta)
+                # if I_prev[i, r, t - 1] > 1e-6: 
+                #     print(f"I_prev[{i},{r},{t-1}] = {I_prev[i, r, t - 1]}")
+                # in_transit_sum = sum(f1_prev[j, i, r, t_prime, t - 1] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta)
+                # if in_transit_sum > 1e-6:
+                #     print("in_transit_sum:", in_transit_sum)
                 self.inventory_update_constr1[t, k_t][i, r].setAttr(GRB.Attr.RHS, rhs_val)
                 self.inventory_update_constr2[t, k_t][i, r].setAttr(GRB.Attr.RHS, rhs_val)
 
@@ -441,11 +481,14 @@ class MultiStageSPModel:
                     for r in range(self.R):
                         for t_prime in range(t):  # Only for past departure times
                             if (i, j, t_prime, t) not in self.delta: # Check whether flow (i, j) started at t′ is still in transit at stage t
+                                # print("here")
                                 rhs_val = f1_prev[i, j, r, t_prime, t - 1] # If it hasn't arrived yet, carry forward from previous stage
                             else:
                                 rhs_val = 0.0 # If it has arrived, flow is no longer in transit
-
-                            self.in_transit_update_constr[t, k_t][i, j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
+                            # if rhs_val > 1e-6:
+                            #     print("rhs_val:", rhs_val)
+                            self.in_transit_update_constr1[t, k_t][i, j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
+                            self.in_transit_update_constr2[t, k_t][i, j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
     
     """
     def mspFP_update_rhs_time1(self, t, k_t, I_prev, U_prev):
@@ -477,7 +520,8 @@ class MultiStageSPModel:
             dual_demand2    = {}  # (k,i)          
             dual_inventory1 = {}  # (k,i,r)   
             dual_inventory2 = {}  # (k,i,r)
-            dual_transit    = {}  # (k,i,j,r,t′)    
+            dual_transit1    = {}  # (k,i,j,r,t′)
+            dual_transit2    = {}  # (k,i,j,r,t′)    
 
             sample_state = state_path[t - 1]  # The state observed at time t-1
 
@@ -511,7 +555,8 @@ class MultiStageSPModel:
                             if (i, j) in self.A:
                                 for r in range(self.R):
                                     for t_prime in range(t):
-                                        dual_transit[k_state, i, j, r, t_prime] = self.in_transit_update_constr[t, k_state][i, j, r, t_prime].pi
+                                        dual_transit1[k_state, i, j, r, t_prime] = self.in_transit_update_constr1[t, k_state][i, j, r, t_prime].pi
+                                        dual_transit2[k_state, i, j, r, t_prime] = self.in_transit_update_constr2[t, k_state][i, j, r, t_prime].pi
 
             # Solving all stage-(t-1) problems and generate cuts/valid inequalities
             for n in self.nodeLists[t - 1]:
@@ -529,14 +574,13 @@ class MultiStageSPModel:
                 ):
                     cutviolFlag = True # Note that if this is True we generate the cut not only for this state, but also for all other states at the relevant state.
 
-                # Initialize coeff-dictionaries for each state variable
+                # Initialize coeff-lists for each state variable
                 cutcoef_U1 = [0] * self.V
                 cutcoef_U2 = [0] * self.V
                 cutcoef_I1 = [[0] * self.R for _ in range(self.V)]  
                 cutcoef_I2 = [[0] * self.R for _ in range(self.V)] 
-                cutcoef_f1_1 = [[0] * self.R for _ in range(self.V)] 
-                cutcoef_f1_2 = [[0] * self.R for _ in range(self.V)] 
-                cutcoef_f1_3 = {(i, j, r, t_prime): 0.0 for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R) for t_prime in range(t)}            
+                cutcoef_f1 = {(i, j, r, t_prime): 0.0 for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R) for t_prime in range(t)}     
+                cutcoef_f2 = {(i, j, r, t_prime): 0.0 for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R) for t_prime in range(t)}        
                 cut_rhs = 0.0   
 
                 for k_state in self.nodeLists[t]:
@@ -546,35 +590,25 @@ class MultiStageSPModel:
                         # Demand-shortage constraints
                         for i in range(self.V):
                             lam1 = dual_demand1[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)] 
-                            cutcoef_U1[i] += lam1                                                 # Coefficient
-                            cut_rhs += lam1 * U_prev[i][t-1]                                          # RHS
+                            cutcoef_U1[i] += lam1                                                 
+                            cut_rhs += lam1 * U_prev[i, t-1]                                          
 
                             lam2 = dual_demand2[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
-                            cutcoef_U2[i] += lam2                                                 # Coefficient
-                            cut_rhs += lam2 * U_prev[i][t-1]                                           # RHS
+                            cutcoef_U2[i] += lam2                                                
+                            cut_rhs += lam2 * U_prev[i, t-1]                                           
 
                         # Inventory-balance constraints
                         # State variable I
                         for i in range(self.V):
                             for r in range(self.R):
                                 lam1 = dual_inventory1[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
-                                cutcoef_I1[i][r] += lam1                                          # Coefficient
-                                cut_rhs += lam1 * I_prev[i][r][t-1]                                   # RHS
+                                cutcoef_I1[i][r] += lam1                                          
+                                cut_rhs += lam1 * (I_prev[i, r, t-1] + sum(f1_prev[j, i, r, t_prime, t - 1] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta))                                   
 
                                 lam2 = dual_inventory2[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
-                                cutcoef_I2[i][r] += lam2                                          # Coefficient
-                                cut_rhs += lam2 * I_prev[i][r][t-1]                                    # RHS
+                                cutcoef_I2[i][r] += lam2                                          
+                                cut_rhs += lam2 * (I_prev[i, r, t-1] + sum(f1_prev[j, i, r, t_prime, t - 1] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta))                                  
 
-                        # State variable f1
-                        for i in range(self.V):
-                            for r in range(self.R):
-                                lam1 = dual_inventory1[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
-                                cutcoef_f1_1[i][r] += lam1
-                                cut_rhs += lam1 * sum(f1_prev[j, i, r, t_prime, t-1] for j in range(self.V) if (j, i) in self.A for t_prime in range(t))
-
-                                lam2 = dual_inventory2[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
-                                cutcoef_f1_2[i][r] += lam2
-                                cut_rhs += lam2 * sum(f1_prev[j, i, r, t_prime, t-1] for j in range(self.V) if (j, i) in self.A for t_prime in range(t))
 
                         # In-transit flow constraints
                         for i in range(self.V):
@@ -582,10 +616,23 @@ class MultiStageSPModel:
                                 if (i, j) in self.A:
                                     for r in range(self.R):
                                         for t_prime in range(t):
-                                            if (i, j, t_prime, t) not in self.delta: # Be careful about this!
-                                                lam = dual_transit[k_state, i, j, r, t_prime] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
-                                                cutcoef_f1_3[(i, j, r, t_prime)] += lam 
-                                                cut_rhs += lam * f1_prev[i, j, r, t_prime, t-1]
+                                            if (i, j, t_prime, t) not in self.delta:
+                                                lam1 = dual_transit1[k_state, i, j, r, t_prime] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
+                                                cutcoef_f1[(i, j, r, t_prime)] += lam1 
+                                                cut_rhs += lam1 * f1_prev[i, j, r, t_prime, t-1]
+
+                                                lam2 = dual_transit2[k_state, i, j, r, t_prime] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
+                                                cutcoef_f2[(i, j, r, t_prime)] += lam2 
+                                                cut_rhs += lam2 * f1_prev[i, j, r, t_prime, t-1]
+
+
+                # for i, val in enumerate(cutcoef_U1):
+                #     if abs(val) > 1e-6:
+                #         print(f"U1[{i}] = {val}")
+
+                # for i, val in enumerate(cutcoef_U2):
+                #     if abs(val) > 1e-6:
+                #         print(f"U2[{i}] = {val}")
 
                 # Add the cut
                 # Pay attention to the signs of the terms on the left ahdn side and sign of cut_rhs on thr right hand side 
@@ -594,9 +641,10 @@ class MultiStageSPModel:
                                         - gp.quicksum(cutcoef_U2[i] * self.U[t-1, n][i] for i in range(self.V))
                                         - gp.quicksum(cutcoef_I1[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
                                         - gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
-                                        - gp.quicksum(cutcoef_f1_1[i][r] * gp.quicksum(self.f1[t-1, n][j, i, r, t_prime] for j in range(self.V) if (j, i) in self.A for t_prime in range(t)) for i in range(self.V) for r in range(self.R))
-                                        - gp.quicksum(cutcoef_f1_2[i][r] * gp.quicksum(self.f1[t-1, n][j, i, r, t_prime] for j in range(self.V) if (j, i) in self.A for t_prime in range(t)) for i in range(self.V) for r in range(self.R))
-                                        - gp.quicksum(cutcoef_f1_3[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R) for t_prime in range(t)) 
+                                        - gp.quicksum(cutcoef_I1[i][r] * gp.quicksum(self.f1[t-1, n][j, i, r, t_prime] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta) for i in range(self.V) for r in range(self.R))
+                                        - gp.quicksum(cutcoef_I2[i][r] * gp.quicksum(self.f1[t-1, n][j, i, r, t_prime] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta) for i in range(self.V) for r in range(self.R))
+                                        - gp.quicksum(cutcoef_f1[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R) for t_prime in range(t)) 
+                                        - gp.quicksum(cutcoef_f2[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for i in range(self.V) for j in range(self.V) if (i, j) in self.A for r in range(self.R) for t_prime in range(t))
                                         >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
                 # if t == 1:
                 #     self.m[t-1, n].update()
@@ -804,7 +852,7 @@ class MultiStageSPModel:
                             for j in range(self.V):
                                 if (i, j) in self.A:
                                     for r in range(self.R):
-                                        for t_prime in range(t):  # Only t′ < t matters
+                                        for t_prime in range(t+1):  # Only t′ < t matters
                                             f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
 
         mean_obj = np.mean(np.sum(objs, axis=1))
