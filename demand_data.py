@@ -591,4 +591,51 @@ class DemandData:
                 demand_i[i] = 0.0
         return demand_i
 
+    def msp_post_landfall_demand(self, k_t, network_processor):
+        """
+        Generate deterministic PoD-level demand for t > t_L (i.e., post-landfall),
+        based on the hurricane category from the Markov state k_t at landfall time.
+        """
+        # Load pod info from Excel
+        pod_info_df = pd.read_excel("Data/PoD location information.xlsx", sheet_name="Sheet1")
+        
+        # Extract hurricane category from Markov state
+        cat = int(k_t[1])
 
+        # Initialize local demand dictionary
+        demand = {}
+
+        if cat == 0 or pd.isna(cat):
+            # No demand if hurricane category is 0 or NaN
+            for i in network_processor.V3:
+                for t in network_processor.T_Aft:
+                    demand[(i, t)] = 0.0
+        else:
+            # Retrieve demand-related columns
+            demand_col = f"I*p_c (cat {cat})"
+            evac_col = "% 1- (Likely to evacuate)"
+            total_demand = pod_info_df[demand_col] * pod_info_df[evac_col]
+            total_demand = total_demand.to_numpy()
+
+            # Gaussian-weighted temporal distribution
+            mean = np.mean(network_processor.T_Aft)
+            std = self.std_pod
+            weights = np.array([
+                np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
+            ])
+            weights /= weights.sum()
+
+            # Assign demand to PoD nodes
+            for idx, i in enumerate(network_processor.V3):
+                for w_idx, t in enumerate(network_processor.T_Aft):
+                    if (i, t) not in demand:
+                        demand[(i, t)] = total_demand[idx] * weights[w_idx]
+
+        # Assign zero demand to all non-PoD nodes
+        for i in range(network_processor.V):
+            if i not in network_processor.V3:
+                for t in network_processor.T_Aft:
+                    if (i, t) not in demand:
+                        demand[(i, t)] = 0.0
+
+        return demand

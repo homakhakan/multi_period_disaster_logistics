@@ -8,7 +8,7 @@ FUEL_COST_PER_MILE: 0.1
 
 
 INVENTORY_COLUMNS:
-  original: ["Water StartInv"]
+  original: ["Water StartInv", "Food StartInv", "Cot StartInv", "Blanket StartInv"]
   largesize: ["Water StartInv"]
   smallsize: ["Water StartInv"]
   mediumsize: ["Water StartInv"]
@@ -31,8 +31,8 @@ EPS: 1e-5
 smallest_trans_prob: 0.0005
 CUTVIOL: 0.00001
 MAX_ITER: 100000
-STALL: 100
+STALL: 200
 CUTVIOL_MAXITER: 100000
-TIME_LIMIT: 10800
+TIME_LIMIT: 7200
 LOWER_BOUND: 1e10
 relative_gap: 1e10

@@ -115,7 +115,6 @@ if __name__ == "__main__":
 
         print("\nReading data...")  
         # Print the output
-        print(f"\nAll counties: {network_processor.C}")
         print(f"All locations: {network_processor.V}")
         print(f"Warehouse/Supplier locations: {len(network_processor.V0)}, {network_processor.V0}")
         print(f"Shelter locations: {len(network_processor.V1)}, {network_processor.V1}")
@@ -164,7 +163,7 @@ if __name__ == "__main__":
         # Load inputs once
         demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/Distance_podtoshelter.xlsx", network_processor=network_processor)
 
-        sample_paths_file = "Data/real_sample_paths.csv"
+        sample_paths_file = "Data/real_OOS_paths.csv"
         
         # Load OOS sample paths (CSV)
         OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths.csv"
@@ -258,7 +257,7 @@ if __name__ == "__main__":
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "Data/real_sample_paths.csv"
+        sample_paths_file = "Data/real_OOS_paths.csv"
 
         start_time_rh = time.time()
         avg_cost, total_costs = rh_model_instance.RH_evaluation(

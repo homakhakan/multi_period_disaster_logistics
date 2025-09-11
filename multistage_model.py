@@ -49,7 +49,7 @@ class MultiStageSPModel:
             for i in range(self.V):
                 for j in range(self.V):        
                     if (i, j) in self.A:
-                        for t in range(self.T1):
+                        for t in range(self.T-2): # Note that the max possible travel time=3 now, that's why we go until T-2 to save memory
                             t_prime = t - self.t_ijt[i][j] - 1
                             if 0 <= t_prime:          
                                 self.delta.append((i, j, t_prime, t))
@@ -288,7 +288,8 @@ class MultiStageSPModel:
             self.init_in_transit_constr = {}
 
         # Loop over pre-landfall stochastic stages (t = 0 … 9)
-        for t in range(self.T1):
+        # for t in range(self.T1):
+        for t in range(self.T1 - 1):
             for k in self.nodeLists[t]: # Every reachable Markov state at time t
                 if self.travel_time == 1:
                     (
@@ -323,8 +324,199 @@ class MultiStageSPModel:
                         self.init_in_transit_constr[t, k],
                     ) = self.stage_t_state_k_problem(t, k)
 
-                if t == self.t_L:
-                    self.theta[t, k].setAttr(GRB.Attr.UB, 0) # Fix theta = 0 at last stage
+                # if t == self.t_L:
+                #     self.theta[t, k].setAttr(GRB.Attr.UB, 0) # Fix theta = 0 at last stage
+
+    
+    def last_stage_model(self, k_t):
+
+        m = gp.Model("last_stage")
+        m.setParam("OutputFlag", 0)
+        m.modelSense = GRB.MINIMIZE
+
+        # Define variables
+        I = {}
+        for i in range(self.V):
+            for r in range(self.R):
+                for t in range(self.t_L, self.T): # t = 9, 10, ..., 15
+                    I[i, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0)
+
+        U = {}
+        for i in range(self.V):
+            for t in range(self.t_L, self.T):
+                U[i, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0)
+
+        S = {}
+        for i in range(self.V):
+            for t in range(self.t_L, self.T):
+                S[i, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0)
+
+        f = {}      
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        for t in range(self.t_L, self.T):
+                            f[i, j, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0)
+
+        f1 = {}
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        for t in range(self.t_L, self.T):        # t = 9, ..., 15
+                            for t_prime in range(t+1):             # t' <= t
+                                f1[i, j, r, t_prime, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0)
+        
+        # Constraints
+        # Demand shortage init
+        demand_shortage_constr1 = {}
+        for i in range(self.V):
+            demand_shortage_constr1[i] = m.addConstr(U[i, self.t_L] + S[i, self.t_L] <= 0)
+
+        demand_shortage_constr2 = {}
+        for i in range(self.V):
+            demand_shortage_constr2[i] = m.addConstr(U[i, self.t_L] + S[i, self.t_L] >= 0)
+
+        # Demand after landfall, only for pods
+        post_landfall_demand = self.demand_processor.msp_post_landfall_demand(k_t, self.network_processor)
+        
+        # Demand shortage post landfall
+        demand_shortage_post = {}
+        for i in range(self.V):
+            for t in range(self.t_L + 1, self.T):
+                demand_shortage_post[i, t] = m.addConstr(U[i, t] == U[i, t - 1] - S[i, t] + post_landfall_demand[(i, t)])
+
+        # Inventory update init
+        inventory_update_constr1 = {}
+        for i in range(self.V):
+            for r in range(self.R):
+                # Determine g_r coefficient
+                if i in self.V1:            
+                    g_coeff = self.g_shelter[r] # shelter
+                elif i in self.V3:          
+                    g_coeff = self.g_pod[r] # PoD
+                else:                  
+                    g_coeff = 0 # warehouse or RSA
+                inventory_update_constr1[i, r] = m.addConstr(I[i, r, self.t_L] + gp.quicksum(f[i, j, r, self.t_L] for j in range(self.V) if (i, j) in self.A) + S[i, self.t_L] * g_coeff <= 0)
+
+        inventory_update_constr2 = {}
+        for i in range(self.V):
+            for r in range(self.R):
+                # Determine g_r coefficient
+                if i in self.V1:            
+                    g_coeff = self.g_shelter[r] # shelter
+                elif i in self.V3:          
+                    g_coeff = self.g_pod[r] # PoD
+                else:                  
+                    g_coeff = 0 # warehouse or RSA
+                inventory_update_constr2[i, r] = m.addConstr(I[i, r, self.t_L] + gp.quicksum(f[i, j, r, self.t_L] for j in range(self.V) if (i, j) in self.A) + S[i, self.t_L] * g_coeff >= 0)
+
+        # Inventory update post landfall
+        inventory_update_post= {}
+        for i in range(self.V):
+            for r in range(self.R):
+                for t in range(self.t_L + 1, self.T):
+                    # Determine g_r coefficient
+                    if i in self.V1:            
+                        g_coeff = self.g_shelter[r] # shelter
+                    elif i in self.V3:          
+                        g_coeff = self.g_pod[r] # PoD
+                    else:                  
+                        g_coeff = 0 # warehouse or RSA
+                    inventory_update_post[i, r, t] = m.addConstr(I[i, r, t] == I[i, r, t - 1] - gp.quicksum(f[i, j, r, t] for j in range(self.V) if (i, j) in self.A) 
+                                                                + gp.quicksum(f1[j, i, r, t_prime, t] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta) 
+                                                                - S[i, t] * g_coeff)
+
+        # Flow capacity post landfall
+        flow_capacity_post = {}
+        for (i, j) in self.A:
+            for t in range(self.t_L, self.T):
+                flow_capacity_post[i, j, t] = m.addConstr(gp.quicksum(self.w_r[r] * f[i, j, r, t] for r in range(self.R)) <= self.K_ijt[i][j][t])
+
+        # In-transit flow init
+        in_transit_update_constr1 = {}
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        for t_prime in range(self.t_L): 
+                            in_transit_update_constr1[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime, self.t_L] <= 0)
+
+        in_transit_update_constr2 = {}
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        for t_prime in range(self.t_L): 
+                            in_transit_update_constr2[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime, self.t_L] >= 0)
+
+
+        # In-transit flow post landfall
+        in_transit_post = {}
+        for i in range(self.V):
+            for j in range(self.V):
+                if (i, j) in self.A:
+                    for r in range(self.R):
+                        for t in range(self.t_L + 1, self.T):
+                            for t_prime in range(t): 
+                                if (i, j, t_prime, t) not in self.delta:
+                                    in_transit_post[i, j, r, t, t_prime] = m.addConstr(f1[i, j, r, t_prime, t] == f1[i, j, r, t_prime, t-1])
+                                else:
+                                    in_transit_post[i, j, r, t, t_prime] = m.addConstr(f1[i, j, r, t_prime, t] == 0)
+
+        # Objective
+        objective = (
+            gp.quicksum(self.p_i[i] * U[i, t] for i in range(self.V) for t in range(self.t_L, self.T)) 
+            + gp.quicksum(
+                gp.quicksum(self.cost_ir[i][r] * f[i, j, r, t] for i in self.V0 for j in range(self.V) if (i, j) in self.A)
+                + gp.quicksum(self.m_ij[i][j] * f[i, j, r, t] for i in range(self.V) for j in range(self.V) if (i, j) in self.A) 
+                for r in range(self.R) for t in range(self.t_L, self.T)))
+        
+        m.setObjective(objective, GRB.MINIMIZE)
+        m.update()
+    
+        return m, I, U, S, f, f1, demand_shortage_constr1, demand_shortage_constr2, demand_shortage_post, inventory_update_constr1, inventory_update_constr2, inventory_update_post, flow_capacity_post, in_transit_update_constr1, in_transit_update_constr2, in_transit_post
+    
+    def build_last_stage(self):
+
+        # Prepare dictionaries
+        # self.m = {}
+        # self.I = {}
+        # self.U = {}
+        # self.S = {}
+        # self.f = {}
+        # self.f1 = {}
+        # self.demand_shortage_constr1 = {}
+        # self.demand_shortage_constr2 = {}
+        self.demand_shortage_post = {}
+        # self.inventory_update_constr1 = {}
+        # self.inventory_update_constr2 = {}
+        self.inventory_update_post = {}
+        self.flow_capacity_post = {}
+        # self.in_transit_update_constr1 = {}
+        # self.in_transit_update_constr2 = {}
+        self.in_transit_post = {}
+
+        for k in self.nodeLists[self.t_L]:
+            (
+                self.m[self.t_L, k],
+                self.I[self.t_L, k],
+                self.U[self.t_L, k],
+                self.S[self.t_L, k],
+                self.f[self.t_L, k],
+                self.f1[self.t_L, k],
+                self.demand_shortage_constr1[self.t_L, k],
+                self.demand_shortage_constr2[self.t_L, k],
+                self.demand_shortage_post[self.t_L, k],
+                self.inventory_update_constr1[self.t_L, k],
+                self.inventory_update_constr2[self.t_L, k],
+                self.inventory_update_post[self.t_L, k],
+                self.flow_capacity_post[self.t_L, k],
+                self.in_transit_update_constr1[self.t_L, k],
+                self.in_transit_update_constr2[self.t_L, k],
+                self.in_transit_post[self.t_L, k],
+            ) = self.last_stage_model(k)
 
     def forward_pass(self):
 
@@ -341,7 +533,7 @@ class MultiStageSPModel:
                     for j in range(self.V):
                         if (i, j) in self.A:
                             for r in range(self.R):
-                                for t_prime in range(t+1):
+                                for t_prime in range(t+1): 
                                     f1_prev[i, j, r, t_prime, t] = 0.0 
 
         thetaval = [0] * self.T1     # Stores theta values (cost-to-go)
@@ -352,10 +544,13 @@ class MultiStageSPModel:
                 k_t = msp_helper.MC_sample(t - 1, k_t, self.transition_dict)
                 state_path.append(k_t)          # Keep sample path history
                 if self.travel_time == 1:
-                    self.mspFP_update_rhs_time1(t, k_t, I_prev, U_prev)
+                    self.update_rhs_time1(t, k_t, I_prev, U_prev)
                 elif self.travel_time == 2:
-                    self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f1_prev) # Update the right hand side of the constraints
+                    # if t == self.t_L:
+                    #     self.build_last_stage()
+                    self.update_rhs(t, k_t, I_prev, U_prev, f1_prev) # Update the right hand side of the constraints
             self.m[t, k_t].optimize() # Optimize the model
+
 
             # # Debugging
             # print(f"\n--- Stage {t}, State {k_t} ---")
@@ -408,45 +603,34 @@ class MultiStageSPModel:
                 print(f"Model in stage = {t} and state = {k_t}, in forward pass is {self.m[t, k_t].status}")
                 sys.exit(0)
             else:
-                for i in range(self.V):
-                    for r in range(self.R):
-                        I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
-                    U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
-
-                if self.travel_time == 2: 
+                if t < self.t_L:
                     for i in range(self.V):
-                        for j in range(self.V):
-                            if (i, j) in self.A:
-                                for r in range(self.R):
-                                    for t_prime in range(t+1):  # Only t′ < t matters
-                                        f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
+                        for r in range(self.R):
+                            I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
+                        U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
 
-                thetaval[t] = self.theta[t, k_t].x
+                    if self.travel_time == 2: 
+                        for i in range(self.V):
+                            for j in range(self.V):
+                                if (i, j) in self.A:
+                                    for r in range(self.R):
+                                        for t_prime in range(t+1):  # Only t′ < t matters
+                                            f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
+
+                    thetaval[t] = self.theta[t, k_t].x
 
                 if t == 0:
-                    lb = self.m[t, k_t].objVal     
-
-                # # === DEBUG PRINTS START ===
-                # print(f"\n--- FORWARD PASS DEBUG | Stage t = {t} ---")
-                # print(f"Visited state at t = {t}: {k_t}")
-                # print(f"theta[{t}] = {thetaval[t]}")
-
-                # # Random indices to check (you can change or add more)
-                # i, j, r = 6, 7, 0
-                # print(f"I_prev[{i},{r},{t}] = {I_prev[i, r, t]}")
-                # print(f"U_prev[{i},{t}] = {U_prev[i, t]}")
-                # if self.travel_time == 2 and t > 1:
-                #     print(f"f1_prev[{i},{j},{r},{t-2},{t}] = {f1_prev[i, j, r, t-2, t]}")  # Make sure t-2 >= 0          
+                    lb = self.m[t, k_t].objVal            
 
         if self.travel_time == 1:
             return I_prev, U_prev, thetaval, lb, state_path
         elif self.travel_time == 2:
             return I_prev, U_prev, f1_prev, thetaval, lb, state_path
 
-    def mspFP_update_rhs(self, t, k_t, I_prev, U_prev, f1_prev):
+    def update_rhs(self, t, k_t, I_prev, U_prev, f1_prev):
         """Update right-hand sides of the (t , k_t) model constraints before optimization.""" 
 
-       # Realized demand at stage t, given Markov state k_t
+        # Realized demand at stage t, given Markov state k_t
         demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor)
         
         # print(f"\n--- Demand at stage t = {t}, state = {k_t} ---")
@@ -491,7 +675,7 @@ class MultiStageSPModel:
                             self.in_transit_update_constr2[t, k_t][i, j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
     
     """
-    def mspFP_update_rhs_time1(self, t, k_t, I_prev, U_prev):
+    def update_rhs_time1(self, t, k_t, I_prev, U_prev):
         # Update right-hand sides of the (t , k_t) model constraints before optimization.
         
         # Realized demand at stage t, given Markov state k_t
@@ -514,6 +698,7 @@ class MultiStageSPModel:
         cutviolFlag = False
 
         for t in range(len(state_path)-1, 0, -1):
+            # print("t=", t)
             Q = {}  # Use dictionary to store: key = Markov state (tuple), value = objVal
             # List for all the dual multipliers of the constraints
             dual_demand1    = {}  # (k,i)     
@@ -526,7 +711,8 @@ class MultiStageSPModel:
             sample_state = state_path[t - 1]  # The state observed at time t-1
 
             for k_state in self.nodeLists[t]:
-                self.mspFP_update_rhs(t, k_state, I_prev, U_prev, f1_prev)
+                # print("state:", k_state)
+                self.update_rhs(t, k_state, I_prev, U_prev, f1_prev)
                 self.m[t, k_state].optimize()
                 if self.m[t, k_state].status != gp.GRB.OPTIMAL:
                     print("Error in Backward Pass")
@@ -562,12 +748,15 @@ class MultiStageSPModel:
             for n in self.nodeLists[t - 1]:
                 Qvalue = 0
                 for k_state in self.nodeLists[t]:
+                    # print("t:", t)
+                    # print("k_state:", k_state)
                     # Accumulate expected cost-to-go from all reachable next-stage states with non-negligible transition probability
                     if self.transition_dict[str(t-1)][str(n)][str(k_state)] > self.smallest_trans_prob:
                         Qvalue += Q[k_state] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
 
                 # Check if cut is violated at the sample path encountered in the forward pass (Only interested in checking cut violation on the same node as the forward pass)
                 # n  : current state at stage t-1   # sample_state : state that was actually visited in the forward pass
+                # print("sample state:", sample_state)
                 if n == sample_state and (
                         (Qvalue - thetaval[t - 1]) / max(1e-10, abs(thetaval[t - 1])) > self.cutviol 
                         and abs(Qvalue - thetaval[t - 1]) > self.cutviol
@@ -584,6 +773,8 @@ class MultiStageSPModel:
                 cut_rhs = 0.0   
 
                 for k_state in self.nodeLists[t]:
+                    # print("t:", t)
+                    # print("k_state:", k_state)
                     if self.transition_dict[str(t-1)][str(n)][str(k_state)] > self.smallest_trans_prob:
                         
                         # No matter what are the sign of dual variables, we "add" them for the coefficients and the rhs both. 
@@ -632,7 +823,13 @@ class MultiStageSPModel:
 
                 # for i, val in enumerate(cutcoef_U2):
                 #     if abs(val) > 1e-6:
-                #         print(f"U2[{i}] = {val}")
+                #         print(f"U2[{i}] = {val}") 
+
+                # print(f"\n[DEBUG] Adding cut at t={t-1}, state n={n}")
+                # print("[DEBUG] Available keys in self.m (just before error):")
+                # for key in self.m.keys():
+                #     print(f"  key = {key}")
+                # print("[DEBUG] Is key (t-1, n) present?", (t-1, n) in self.m)
 
                 # Add the cut
                 # Pay attention to the signs of the terms on the left ahdn side and sign of cut_rhs on thr right hand side 
@@ -668,7 +865,7 @@ class MultiStageSPModel:
             sample_state = state_path[t - 1]  # The state observed at time t-1
 
             for k_state in self.nodeLists[t]:
-                self.mspFP_update_rhs_time1(t, k_state, I_prev, U_prev)
+                self.update_rhs_time1(t, k_state, I_prev, U_prev)
                 self.m[t, k_state].optimize()
                 if self.m[t, k_state].status != gp.GRB.OPTIMAL:
                     print("Error in Backward Pass")
@@ -754,6 +951,7 @@ class MultiStageSPModel:
     def solve_sddp(self):
 
         self.build_models()
+        self.build_last_stage()
 
         I_ir0 = self.network_processor.I_ir0
         k_init = self.nodeLists[0][0]
@@ -832,28 +1030,41 @@ class MultiStageSPModel:
                 k_t = eval(OS_paths[s, t]) 
                 if t > 0:
                     if self.travel_time == 1:
-                        self.mspFP_update_rhs_time1(t, k_t, I_prev, U_prev)
+                        self.update_rhs_time1(t, k_t, I_prev, U_prev)
                     elif self.travel_time == 2:
-                        self.mspFP_update_rhs(t, k_t, I_prev, U_prev, f1_prev)                
+                        self.update_rhs(t, k_t, I_prev, U_prev, f1_prev)                
                 self.m[t, k_t].optimize()
                 if self.m[t, k_t].status != GRB.OPTIMAL:
                     print(" in evaluation")
                     print(f"Model in stage = {t} and state = {k_t}, in forward pass is {self.m[t,k_t].status}")
                     exit(0)
                 else:
-                    objs[s, t] = self.m[t,k_t].ObjVal - self.theta[t,k_t].x
+                    if t == self.t_L:
+                        theta_val = 0
+                    else:
+                        theta_val = self.theta[t, k_t].x
+                    objs[s, t] = self.m[t,k_t].ObjVal - theta_val
                     for i in range(self.V):
                         for r in range(self.R):
-                            I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
-                        U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
+                            if t == self.t_L:
+                                I_prev[i, r, t] = self.I[t, k_t][i, r, t].x # Extract inventory level (state var)
+                            else:
+                                I_prev[i, r, t] = self.I[t, k_t][i, r].x
+                        if t == self.t_L:
+                            U_prev[i, t] = self.U[t, k_t][i, t].x # Extract demand shortage (state var)
+                        else:
+                            U_prev[i, t] = self.U[t, k_t][i].x
                     
                     if self.travel_time == 2:
                         for i in range(self.V):
                             for j in range(self.V):
                                 if (i, j) in self.A:
                                     for r in range(self.R):
-                                        for t_prime in range(t+1):  # Only t′ < t matters
-                                            f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
+                                        for t_prime in range(t+1):
+                                            if t == self.t_L:
+                                                f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime, t].x
+                                            else:
+                                                f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
 
         mean_obj = np.mean(np.sum(objs, axis=1))
         std_obj = np.std(np.sum(objs, axis=1))
