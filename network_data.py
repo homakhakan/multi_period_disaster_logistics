@@ -53,7 +53,7 @@ class NetworkData:
     
         self.file_paths = {
             "location_file": f"Data/Set V_locations_{self.instance_version}.xlsx",
-            "resource_file": f"Data/Set R_resources_{self.instance_version}.xlsx",
+            "resource_file": f"Data/Set R_resources_debugging.xlsx",
             "duration_matrix_file": f"Data/Duration_all_nodes_{self.instance_version}.txt",
             "distance_matrix_file": f"Data/Distance_all_nodes_{self.instance_version}.txt",
             "arc_capacity_file": f"Data/Arc_capacity_{self.instance_version}.xlsx",
@@ -181,8 +181,8 @@ class NetworkData:
             if i in idx:
                 water_pc = float(self.df_V.at[i, 'Water PC'])
                 food_pc = float(self.df_V.at[i, 'Food PC'])
-                self.cost_ir.append([water_pc, food_pc, 0, 0])
-                # self.cost_ir.append([water_pc])
+                # self.cost_ir.append([water_pc, food_pc, 0, 0])
+                self.cost_ir.append([water_pc])
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
