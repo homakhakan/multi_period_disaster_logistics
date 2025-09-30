@@ -494,7 +494,8 @@ class MultiStageSPModel:
                         g_coeff = self.g_pod[r] # PoD
                     else:                  
                         g_coeff = 0 # warehouse or RSA
-                    inventory_update_constr1[i, r] = m.addConstr(I[i, r, self.t_L] + gp.quicksum(f[i, j, r, self.t_L] for j in range(self.V) if (i, j) in self.A) + S[i, self.t_L] * g_coeff <= 0, name=f"InventoryUpdate1_{i}_{r}_{self.t_L}")
+                    inventory_update_constr1[i, r] = m.addConstr(I[i, r, self.t_L] + gp.quicksum(f[i, j, r, self.t_L] for j in range(self.V) if (i, j) in self.A) 
+                                                                 + S[i, self.t_L] * g_coeff <= 0, name=f"InventoryUpdate1_{i}_{r}_{self.t_L}")
 
             inventory_update_constr2 = {}
             for i in range(self.V):
@@ -506,7 +507,8 @@ class MultiStageSPModel:
                         g_coeff = self.g_pod[r] # PoD
                     else:                  
                         g_coeff = 0 # warehouse or RSA
-                    inventory_update_constr2[i, r] = m.addConstr(I[i, r, self.t_L] + gp.quicksum(f[i, j, r, self.t_L] for j in range(self.V) if (i, j) in self.A) + S[i, self.t_L] * g_coeff >= 0, name=f"InventoryUpdate2_{i}_{r}_{self.t_L}")
+                    inventory_update_constr2[i, r] = m.addConstr(I[i, r, self.t_L] + gp.quicksum(f[i, j, r, self.t_L] for j in range(self.V) if (i, j) in self.A) 
+                                                                 + S[i, self.t_L] * g_coeff >= 0, name=f"InventoryUpdate2_{i}_{r}_{self.t_L}")
 
             # Inventory update post landfall
             inventory_update_post= {}
@@ -521,7 +523,8 @@ class MultiStageSPModel:
                         else:                  
                             g_coeff = 0 # warehouse or RSA
                         inventory_update_post[i, r, t] = m.addConstr(I[i, r, t] == I[i, r, t - 1] - gp.quicksum(f[i, j, r, t] for j in range(self.V) if (i, j) in self.A) 
-                                                                    + gp.quicksum(f1[j, i, r, t_prime, t] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta) 
+                                                                    + gp.quicksum(f1[j, i, r, t_prime, t] for j in range(self.V) for t_prime in range(t) 
+                                                                                  if (j, i) in self.A and (j, i, t_prime, t) in self.delta) 
                                                                     - S[i, t] * g_coeff, name=f"InventoryUpdatePost_{i}_{r}_{t}")
 
         # Flow capacity post landfall
