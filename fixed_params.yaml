@@ -19,7 +19,7 @@ std_pod: 1
 
 
 # For sensitivity analysis
-MULTIPLIER1: 1000 # Penalty cost multiplier
+MULTIPLIER1: 1 # Penalty cost multiplier
 MULTIPLIER2: 1 # Travel cost multiplier
 MULTIPLIER3: 1 # Arc capacity multiplier
 
@@ -30,9 +30,9 @@ EPS: 1e-5
 # Multi-Stage
 smallest_trans_prob: 0.0005
 CUTVIOL: 0.00001
-MAX_ITER: 5
+MAX_ITER: 3
 STALL: 200
 CUTVIOL_MAXITER: 100000
-TIME_LIMIT: 72000
+TIME_LIMIT: 43000
 LOWER_BOUND: 1e10
 relative_gap: 1e10

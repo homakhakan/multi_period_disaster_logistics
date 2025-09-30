@@ -173,6 +173,10 @@ class NetworkData:
         # Travel cost between locations
         self.multiplier2 = float(self.params["MULTIPLIER2"])  # Scaling factor
         self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) * self.multiplier2 for j in range(len(self.df_V))] for i in range(len(self.df_V))]
+    
+        # # Convert m_ij into a DataFrame with row and column labels
+        # df_mij = pd.DataFrame(self.m_ij, columns=self.df_V.index, index=self.df_V.index)
+        # df_mij.to_csv("m_ij_matrix.csv", index=True)
 
         # Procurement cost per resource
         self.cost_ir = []
@@ -183,6 +187,7 @@ class NetworkData:
                 food_pc = float(self.df_V.at[i, 'Food PC'])
                 # self.cost_ir.append([water_pc, food_pc, 0, 0])
                 self.cost_ir.append([water_pc])
+        # print(self.cost_ir)
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]

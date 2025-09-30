@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5, 6], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel), 6.multi-stage (SDDP)")
     parser.add_argument("-m", "--model", type=int, choices=[1, 2], required=True, help="Model version: 1 = Using fixed arc capacity, 2 = with vehicle routing decisions")
     parser.add_argument("-tt", "--travel_time", type=int, choices=[1, 2], help="Travel-time mode: 1. All arcs take 1 period to travel, 2. Some arcs might take more than 1 period to travel")
+    parser.add_argument("-ls", "--last_stage", type=int, choices=[1, 2], help="Last stage mode: 1. Last stage includes one single period, 2. Last stage includes multiple periods")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
 
     # New args for running the rolling horizon more easily on Palmetto (Run simultaneously)
@@ -315,7 +316,7 @@ if __name__ == "__main__":
         from msp_helper import create_OSpaths
 
         # Initialize model instance
-        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params, args.travel_time)
+        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params, args.travel_time, args.last_stage)
         
         """
         # Path where we save or load OOS paths
