@@ -1407,7 +1407,6 @@ class MultiStageSPModel:
             print(f"Heatmap saved to: {save_path}")
             # =====================================================================
 
-
             return [mean_obj, CI, test_time]
         
         elif self.last_stage == 2:
