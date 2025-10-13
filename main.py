@@ -40,9 +40,9 @@ from output import save_full_oos_demand
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
-    parser.add_argument("-iv", "--instance_version", type=str, choices=["original"])
+    parser.add_argument("-iv", "--instance_version", type=str, choices=["large", "small"])
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
-    parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon evaluation")
+    parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon/sddp evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
     parser.add_argument("-eos", "--eval_oos", action="store_true", help="Run out-of-sample evaluation for 2SSP after solving extended model")
     parser.add_argument("-sm", "--solution_method", type=int, choices=[1, 2, 3, 4, 5, 6], required=True, help="Solution method: 1. extended, 2. benders, 3. mvp, 4.RH, 5.RH(parallel), 6.multi-stage (SDDP)")
@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     # New args for running the rolling horizon more easily on Palmetto (Run simultaneously)
     parser.add_argument("-si", "--start_index", type=int, default=0, help="Row index in the CSV where this job should start reading")
-    parser.add_argument("-np", "--num_paths",   type=int, default=2, help="How many sample-path rows to read (chunk size)")
+    parser.add_argument("-np", "--num_paths",   type=int, default=5, help="How many sample-path rows to read (chunk size)")
 
     args = parser.parse_args()
 
@@ -66,34 +66,16 @@ if __name__ == "__main__":
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters(args.travel_time)
 
-    # Debugging
-    # print("Number of arcs in network:", len(network_processor.A))
-    # print("Arc capacities K_ijt: max =", np.max(network_processor.K_ijt), ", min =", np.min(network_processor.K_ijt))
-    
-    # # Debugging
-    # print("Travel cost matrix (m_ij): min =", np.min(network_processor.m_ij), ", max =", np.max(network_processor.m_ij))
-    # print("Penalty cost per location (p_i):")
-    # for i, p in enumerate(network_processor.p_i):
-    #     print(f"Location {i}: Penalty = {p}")
-
-    # df_m_ij = pd.DataFrame(
-    #     network_processor.m_ij,
-    #     columns=[f"To_{j}" for j in range(len(network_processor.df_V))]
-    # )
-    # df_m_ij.index = [f"From_{i}" for i in range(len(network_processor.df_V))]
-
-    # print("Travel Cost Matrix (m_ij):")
-    # print(df_m_ij)
-
-    # # Optional: Save to Excel for inspection
-    # df_m_ij.to_excel("travel_cost_matrix.xlsx")
-
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
     # ---------- Simulated In-Sample Demand Setup for static 2SSP-----------
     # Create different scenarios for solving static 2SSP. Based on specifying -ns (number of scenarios), we can have that many scenarios created in "demand_data_dynamic"
     # print("\nGenerating in-sample demand...")
-    demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/Distance_podtoshelter.xlsx", network_processor=network_processor)
+    if args.instance_version == "small":
+        dist_file = "Data/Distance_podtoshelter_small.xlsx"
+    elif args.instance_version == "large":
+        dist_file = "Data/Distance_podtoshelter_large.xlsx"
+    demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file=dist_file, network_processor=network_processor)
     
     if args.solution_method != 6:
         if args.debug:
@@ -162,7 +144,11 @@ if __name__ == "__main__":
         total_costs = []
 
         # Load inputs once
-        demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file="Data/Distance_podtoshelter.xlsx", network_processor=network_processor)
+        if args.instance_version == "small":
+            dist_file = "Data/Distance_podtoshelter_small.xlsx"
+        elif args.instance_version == "large":
+            dist_file = "Data/Distance_podtoshelter_large.xlsx"
+        demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file=dist_file, network_processor=network_processor)
 
         sample_paths_file = "Data/real_OOS_paths.csv"
         
@@ -174,7 +160,7 @@ if __name__ == "__main__":
         t_L = max(network_processor.T_Bef)
 
         for k in range(args.num_oos):
-            print(f"\n🔁 OOS Scenario {k}")
+            # print(f"\n OOS Scenario {k}")
             sample_path_row = OS_paths[k]
             s_t0 = eval(sample_path_row[0])  # current hurricane state at t = 0
 
@@ -198,14 +184,25 @@ if __name__ == "__main__":
             # Step 3: Solve deterministic second-stage model with fixed I
             cost = ext_model_instance.OOS_2SSP(fixed_I_irt)
             total_costs.append(cost)
-            print(f"   ➤ Cost = {cost:.2f}")
+            # print(f"   ➤ Cost = {cost:.2f}")
 
         total_eval_time = time.time() - start_time  # End timer
-        print(f"\n Total OOS Evaluation Time: {total_eval_time:.2f} seconds")
+        print(f"\nTotal OOS Evaluation Time: {total_eval_time:.2f} seconds")
 
         # Final summary
         avg_cost = np.mean(total_costs)
-        print(f"\n✅ Average OOS Cost over {args.num_oos} scenarios: {avg_cost:.2f}")
+        std_obj = np.std(total_costs)   # sample standard deviation
+        nbOS = len(total_costs)                 # number of OOS scenarios
+
+        ci_low = avg_cost - 1.96 * std_obj / np.sqrt(nbOS)
+        ci_high = avg_cost + 1.96 * std_obj / np.sqrt(nbOS)
+        CI = avg_cost - ci_low
+
+        print(f"\nTwo-Stage OOS Evaluation Results")
+        print(f"μ ± 1.96*σ/√NS = {avg_cost:.2f} ± {CI:.2f}")
+        print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
+
+        # print(f"\n Average OOS Cost over {args.num_oos} scenarios: {avg_cost:.2f}")
 
         # Save to Excel
         output.oos_2SSP_results(costs=total_costs, instance_version=args.instance_version, num_oos=args.num_oos, total_time=total_eval_time, output_filename="Results/oos_2SSP_results.xlsx")
@@ -271,8 +268,18 @@ if __name__ == "__main__":
         end_time_rh = time.time()
         total_time_rh = end_time_rh - start_time_rh
 
-        print(f"\nAverage RH Objective Value: {avg_cost:.2f}")
-        print(f"Total RH Costs per Sample Path: {total_costs}")
+        # print(f"\nAverage RH Objective Value: {avg_cost:.2f}")
+        # print(f"Total RH Costs per Sample Path: {total_costs}")
+        nbOS = len(total_costs)
+        mean_obj = np.mean(total_costs)
+        std_obj = np.std(total_costs)
+        ci_low = mean_obj - 1.96 * std_obj / np.sqrt(nbOS)
+        ci_high = mean_obj + 1.96 * std_obj / np.sqrt(nbOS)
+        CI = mean_obj - ci_low
+
+        print(f"\nRolling Horizon Evaluation Results")
+        print(f"μ ± 1.96*σ/√NS = {mean_obj:.2f} ± {CI:.2f}")
+        print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
         print(f"Total Execution Time for RH Evaluation: {total_time_rh:.2f} seconds")
 
         output.rh_results(
@@ -312,6 +319,19 @@ if __name__ == "__main__":
         )
 
     elif args.solution_method == 6:
+        # import cProfile
+        # import pstats
+        print("\nReading data...")  
+        # Print the output
+        print(f"All locations: {network_processor.V}")
+        print(f"Warehouse/Supplier locations: {len(network_processor.V0)}, {network_processor.V0}")
+        print(f"Shelter locations: {len(network_processor.V1)}, {network_processor.V1}")
+        print(f"RSA locations: {len(network_processor.V2)}, {network_processor.V2}")
+        print(f"PoD locations: {len(network_processor.V3)}, {network_processor.V3}")
+        print(f"All resources: {network_processor.R}")
+        print(f"Time periods: {network_processor.T}")
+        print(f"Time Before Landfall: {network_processor.T_Bef}")
+        print(f"Time After Landfall: {network_processor.T_Aft}")
         from multistage_model import MultiStageSPModel 
         from msp_helper import create_OSpaths
 
@@ -335,9 +355,17 @@ if __name__ == "__main__":
             print(f"[INFO] Using existing OOS paths file: {sample_paths_file}")
         exit(0)
         """
+        # # === PROFILE SDDP TRAINING ===
+        # print(f"\n[PROFILING] SDDP Training in process ...")
+        # prof_train = cProfile.Profile()
+        # prof_train.enable()
+        
         # Run the SDDP algorithm
         print(f"\nSDDP Training in process ...")
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
+
+        # prof_train.disable()
+        # prof_train.dump_stats("profile_sddp_train.prof")
 
         print(f"\nSDDP Training Complete")
         print(f"Iterations: {total_iter}")

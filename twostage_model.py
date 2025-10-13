@@ -159,17 +159,6 @@ class TwoStageSPModel:
                 for s in sce:
                     m.addConstr(U[i, t, s] == U[i, t-1, s] - S[i, t, s] + self.demand_processor.d_its[(i, t, s)], 
                                 name="DemandShortageUpdate_%s_%s_%s" % (i, t, s))
-        # Show all rows (be careful with very large DataFrames!)
-        pd.set_option('display.max_rows', None)
-        pd.set_option('display.max_columns', None)            
-        # Convert dict to DataFrame
-        df = pd.DataFrame.from_dict(self.demand_processor.d_its, orient="index")
-        df.index = pd.MultiIndex.from_tuples(df.index, names=["Location", "Time", "Scenario"])
-        df.columns = ["Demand"]
-
-        # Nice formatted view
-        print(df.sort_index())
-        exit(0)
         
         # Initial demand shortage for all locations and scenarios at time period t=0
         for i in range(V):

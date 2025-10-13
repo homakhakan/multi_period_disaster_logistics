@@ -53,7 +53,7 @@ class NetworkData:
     
         self.file_paths = {
             "location_file": f"Data/Set V_locations_{self.instance_version}.xlsx",
-            "resource_file": f"Data/Set R_resources_debugging.xlsx",
+            "resource_file": f"Data/Set R_resources_one_type.xlsx",
             "duration_matrix_file": f"Data/Duration_all_nodes_{self.instance_version}.txt",
             "distance_matrix_file": f"Data/Distance_all_nodes_{self.instance_version}.txt",
             "arc_capacity_file": f"Data/Arc_capacity_{self.instance_version}.xlsx",
@@ -123,6 +123,9 @@ class NetworkData:
                 if i in self.V0 and j in self.V0 and not (i in S and j in W):
                     continue
                 self.A.add((i, j))
+        
+        # for i, j in sorted(self.A, key=lambda x: (x[0], x[1])):
+        #     print((i, j))
 
         return self.A
 
@@ -163,6 +166,7 @@ class NetworkData:
             # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
             # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
             self.t_ijt = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
+            self.tt_max = np.max(self.t_ijt) + 1 # Extract the maximum travel time + delay to later use in sddp for saving some computational time
 
         #Starting number of trucks at location i (time period 0)
         self.C_i0 = self.df_V["TruckStart"].tolist()
@@ -188,6 +192,7 @@ class NetworkData:
                 # self.cost_ir.append([water_pc, food_pc, 0, 0])
                 self.cost_ir.append([water_pc])
         # print(self.cost_ir)
+        # exit(0)
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
