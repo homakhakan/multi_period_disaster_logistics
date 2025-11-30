@@ -1,0 +1,36 @@
+# Network
+TPERIOD: 12 # Time discretization in hours
+T1: 10 # Time periods before landfall
+T2: 6 # Time periods after landfall 
+TOTAL_HOURS: 192 # total hours during the planning horizon (8 days: 5 days before and 3 days after landfall)
+MILES_TO_METERS: 0.000621371
+FUEL_COST_PER_MILE: 0.1 
+
+
+INVENTORY_COLUMNS:
+  large: ["Water StartInv"]
+  small: ["Water StartInv"]
+
+
+# Normal distribution params related to distributing total PoD demand 
+std_pod: 1
+
+
+# For sensitivity analysis
+MULTIPLIER1: 1 # Penalty cost multiplier
+MULTIPLIER2: 1 # Travel cost multiplier
+MULTIPLIER3: 1 # Arc capacity multiplier
+
+# Benders config
+THETA_LB: 0
+EPS: 1e-5
+
+# Multi-Stage
+smallest_trans_prob: 0.0005
+CUTVIOL: 0.0001
+MAX_ITER: 5
+STALL: 200
+CUTVIOL_MAXITER: 100000
+TIME_LIMIT: 86400
+LOWER_BOUND: 1e10
+relative_gap: 1e10

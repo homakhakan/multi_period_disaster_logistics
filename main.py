@@ -107,7 +107,7 @@ if __name__ == "__main__":
     print(f"Time periods: {network_processor.T}")
     print(f"Time Before Landfall: {network_processor.T_Bef}")
     print(f"Time After Landfall: {network_processor.T_Aft}")
-    print(f"Scenario probabilities: {demand_processor.P}")
+    # print(f"Scenario probabilities: {demand_processor.P}")
 
     # Run only the selected model
     if args.solution_method == 1:
