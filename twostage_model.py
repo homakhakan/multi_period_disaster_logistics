@@ -11,15 +11,8 @@ class TwoStageSPModel:
     def __init__(self, network_processor, demand_processor, num_sce):
         self.network_processor = network_processor  # Store network data
         self.demand_processor = demand_processor  # Store demand data
-        # if not hasattr(self.demand_processor, 'd_its_original'):
-        #     self.demand_processor.d_its_original = self.demand_processor.d_its
-        # if not hasattr(self.demand_processor, 'P_original'):
-        #     self.demand_processor.P_original = self.demand_processor.P.copy()
-
         self.num_sce = num_sce  # Use full scenarios for other models
-
-        # Initialize fixed_flow_all for use across RH-related functions
-        self.fixed_flow_all = {}
+        self.fixed_flow = {} # Initialize fixed_flow for use across RH-related functions
 
     def ext_model(self, is_mvp=False, model_version=1):
 
@@ -28,8 +21,6 @@ class TwoStageSPModel:
             self.demand_processor.P = [1]
             self.num_sce = 1
         else:
-            # self.demand_processor.d_its = self.demand_processor.d_its_original
-            # self.demand_processor.P = self.demand_processor.P_original
             self.num_sce = len(self.demand_processor.P)
 
         m = gp.Model("Two-Stage Stochastic Programming Model")
@@ -151,7 +142,8 @@ class TwoStageSPModel:
         #Starting Value of I[t=0]
         for i in range(V):
             for r in range(R):
-                m.addConstr(I[i,r,0]==I_ir0[i][r])
+                for s in sce:
+                    m.addConstr(I[i, r, 0] == I_ir0[i][r] - gp.quicksum(f[i, j, r, 0, s] for j in range(V) if (i, j) in A) - S[i, 0, s]) ## WATCH OUT for g_r
         
         # Update demand shortage for all locations, time periods (except t=0), and scenarios
         for i in range(V):
@@ -163,32 +155,38 @@ class TwoStageSPModel:
         # Initial demand shortage for all locations and scenarios at time period t=0
         for i in range(V):
             for s in sce:
-                m.addConstr(U[i, 0, s] == self.demand_processor.d_its[(i, 0, s)], name="InitialDemandShortage_%s_%s" % (i, s))
+                m.addConstr(U[i, 0, s] == self.demand_processor.d_its[(i, 0, s)] - S[i, 0, s], name="InitialDemandShortage_%s_%s" % (i, s))
         
-        # Inventory update constraint for all locations, commodities, time periods (except last), and scenarios
+        # Add nonanticipativity constraints
+        for (i, j) in A:
+            for r in range(R):
+                for s in range(1, self.num_sce): # skip s=0 (used as reference) 
+                    m.addConstr(f[i, j, r, 0, s] == f[i, j, r, 0, 0], name=f"NonAntic_f_{i}_{j}_{r}_{0}_{s}")
+        
+        # Inventory update constraint for all locations, commodities, time periods (except 0), and scenarios
         for i in range(V):
             for r in range(R):
-                for t in range(T - 1):
+                for t in range(1, T):
                     for s in sce:
                         outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
-                        incoming_flow = gp.quicksum(f[j, i, r, t - t_ijt[j][i] + 1, s] for j in range(V) if (j, i) in A and t - t_ijt[j][i] + 1 >= 0)
+                        incoming_flow = gp.quicksum(f[j, i, r, t - (t_ijt[j][i] + 1), s] for j in range(V) if (j, i) in A and t - (t_ijt[j][i] + 1) >= 0)
                         
                         # Inventory update constraint for shelters
                         if i in V1:
                             m.addConstr(
-                                I[i, r, t + 1] == I[i, r, t] - outgoing_flow + incoming_flow - S[i, t, s] * g_shelter[r],
+                                I[i, r, t] == I[i, r, t-1] - outgoing_flow + incoming_flow - S[i, t, s] * g_shelter[r],
                                 name="InventoryUpdate_Shelter_%s_%s_%s_%s" % (i, r, t, s)
                             )
                         # Inventory update constraint for pods
                         elif i in V3:
                             m.addConstr(
-                                I[i, r, t + 1] == I[i, r, t] - outgoing_flow + incoming_flow - S[i, t, s] * g_pod[r],
+                                I[i, r, t] == I[i, r, t-1] - outgoing_flow + incoming_flow - S[i, t, s] * g_pod[r],
                                 name="InventoryUpdate_Pod_%s_%s_%s_%s" % (i, r, t, s)
                             )
                         # Inventory update constraint for warehouses and RSAs
                         else:
                             m.addConstr(
-                                I[i, r, t + 1] == I[i, r, t] - outgoing_flow + incoming_flow,
+                                I[i, r, t] == I[i, r, t-1] - outgoing_flow + incoming_flow,
                                 name="InventoryUpdate_%s_%s_%s_%s" % (i, r, t, s)
                             )
         
@@ -256,7 +254,7 @@ class TwoStageSPModel:
         m.update()
         return m, I
 
-    def OOS_2SSP(self, fixed_I_irt):
+    def OOS_2SSP(self, fixed_I_irt, args):
         """
         Evaluate the deterministic second-stage cost for a single OOS demand scenario,
         by fixing all inventory variables I[i, r, t] to values from the static solution.
@@ -271,8 +269,13 @@ class TwoStageSPModel:
         self.num_sce = 1
         self.demand_processor.P = [1]
 
-        # Build the model (variables are free initially)
-        model, I_vars = self.ext_model(is_mvp=False)
+        # Build appropriate model depending on the method
+        if args.solution_method == 1:
+            model, I_vars = self.ext_model(is_mvp=False)
+        elif args.solution_method == 8:
+            model, I_vars = self.WS_model(args.t_tilda)
+        else:
+            raise ValueError("OOS evaluation only supported for methods 1 (2SSP) and 8 (WS).")
 
         # Fix each I[i, r, t] to its corresponding value using equality constraints
         for (i, r, t), val in fixed_I_irt.items():
@@ -288,13 +291,178 @@ class TwoStageSPModel:
             print(f"[Warning] Model not optimal. Status: {model.status}")
             return float("inf")
 
-    def extract_all_inventory(self, I_vars):
+    def extract_all_inventory(self, I_vars, t_tilda=0):
         inventory_values = {}
         for i in range(self.network_processor.V):
             for r in range(self.network_processor.R):
-                for t in range(self.network_processor.T):
+                for t in range(t_tilda, self.network_processor.T):
                     inventory_values[(i, r, t)] = I_vars[i, r, t].X
         return inventory_values
+    
+    def WS_model(self, t_tilda):
+
+        m = gp.Model(f"Wait-and-See_model_t_tilda={t_tilda} ") # Based on 2SSP
+
+        self.num_sce = len(self.demand_processor.P)
+        V = self.network_processor.V
+        V0 = self.network_processor.V0
+        V1 = self.network_processor.V1
+        V3 = self.network_processor.V3
+        R = self.network_processor.R
+        T = self.network_processor.T
+        T_Bef = self.network_processor.T_Bef
+        A = self.network_processor.A
+        K_ijt = self.network_processor.K_ijt
+        w_r = self.network_processor.w_r
+        I_ir0 = self.network_processor.I_ir0
+        C_i0 = self.network_processor.C_i0
+        h_i = self.network_processor.h_i
+        g_shelter = self.network_processor.g_shelter
+        g_pod = self.network_processor.g_pod
+        t_ijt = self.network_processor.t_ijt   
+        P = self.demand_processor.P
+        p_i = self.network_processor.p_i
+        cost_ir = self.network_processor.cost_ir
+        m_ij = self.network_processor.m_ij
+        sce = range(self.num_sce)  # Number of scenarios
+
+        # Define first-stage decision variables
+        # I: Inventory of commodity r at node i starting from t_tilda
+        I = {}
+        
+        for i in range(V):
+            for r in range(R):
+                for t in range(t_tilda, T):
+                    I[i, r, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="I_%s_%s_%s" % (i, r, t))
+
+        # Define second-stage decision variables
+        U = {}  # Demand shortage at location i starting from t_tilda in scenario s
+        
+        for i in range(V):
+            for t in range(t_tilda, T):
+                for s in sce:  # Iterate directly over the scenario set (e.g., 0 and 1)
+                    U[i, t, s] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="U_%s_%s_%s" % (i, t, s))
+
+        S = {}  # Demand satisfied at location i starting from t_tilda in scenario s
+        
+        for i in range(V):
+            for t in range(t_tilda, T):
+                for s in sce:  # Iterate directly over the scenario set
+                    S[i, t, s] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="S_%s_%s_%s" % (i, t, s))
+        
+        f = {}  # Quantity of commodity r traveling on link (i, j) starting from t_tilda in scenario s
+        
+        for i in range(V):
+            for j in range(V):
+                if (i, j) in A:  # Only define f_ijrt^s if (i, j) is a valid link
+                    for r in range(R):
+                        for t in range(t_tilda, T):
+                            for s in sce:  # Iterate directly over the scenario set
+                                f[i, j, r, t, s] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name="f_%s_%s_%s_%s_%s" % (i, j, r, t, s))
+        m.update()
+
+        # Starting Value of I[t = t_tilda]
+        for i in range(V):
+            for r in range(R):
+                for s in sce:
+                    m.addConstr(I[i, r, t_tilda] == I_ir0[i][r] - gp.quicksum(f[i, j, r, t_tilda, s] for j in range(V) if (i, j) in A) - S[i, t_tilda, s]) ## WATCH OUT for g_r
+
+        # Initial demand shortage for all locations and scenarios at time period t=t_tilda
+        for i in range(V):
+            for s in sce:
+                past_demand = sum(self.demand_processor.d_its[(i, t, s)] for t in range(t_tilda))
+                m.addConstr(U[i, t_tilda, s] == self.demand_processor.d_its[(i, t_tilda, s)] - S[i, t_tilda, s], name="InitialDemandShortage_%s_%s" % (i, s))
+
+        # Update demand shortage for all locations, time periods (except t = t_tilda), and scenarios
+        for i in range(V):
+            for t in range(t_tilda + 1, T):
+                for s in sce:
+                    m.addConstr(U[i, t, s] == U[i, t-1, s] - S[i, t, s] + self.demand_processor.d_its[(i, t, s)], 
+                                name="DemandShortageUpdate_%s_%s_%s" % (i, t, s))
+                    
+        # Add nonanticipativity constraints
+        for (i, j) in A:
+            for r in range(R):
+                for s in range(1, self.num_sce): # skip s=0 (used as reference) 
+                    m.addConstr(f[i, j, r, t_tilda, s] == f[i, j, r, t_tilda, 0], name=f"NonAntic_f_{i}_{j}_{r}_{t_tilda}_{s}")
+
+        # Inventory update constraint for all locations, commodities, time periods (except t_tilda), and scenarios
+        for i in range(V):
+            for r in range(R):
+                for t in range(t_tilda + 1, T):
+                    for s in sce:
+                        outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
+                        incoming_flow = gp.quicksum(f[j, i, r, t - (t_ijt[j][i] + 1), s] for j in range(V) if (j, i) in A and t - (t_ijt[j][i] + 1) >= t_tilda)
+                        
+                        # Inventory update constraint for shelters
+                        if i in V1:
+                            m.addConstr(
+                                I[i, r, t] == I[i, r, t-1] - outgoing_flow + incoming_flow - S[i, t, s] * g_shelter[r],
+                                name="InventoryUpdate_Shelter_%s_%s_%s_%s" % (i, r, t, s)
+                            )
+                        # Inventory update constraint for pods
+                        elif i in V3:
+                            m.addConstr(
+                                I[i, r, t] == I[i, r, t-1] - outgoing_flow + incoming_flow - S[i, t, s] * g_pod[r],
+                                name="InventoryUpdate_Pod_%s_%s_%s_%s" % (i, r, t, s)
+                            )
+                        # Inventory update constraint for warehouses and RSAs
+                        else:
+                            m.addConstr(
+                                I[i, r, t] == I[i, r, t-1] - outgoing_flow + incoming_flow,
+                                name="InventoryUpdate_%s_%s_%s_%s" % (i, r, t, s)
+                            )
+
+        # Flow capacity constraint for all links, starting from t_tilda, and scenarios
+        for i in range(V):
+            for j in range(V):
+                if (i, j) in A:  # Only consider valid links in A
+                    for t in range(t_tilda, T):
+                        for s in sce:
+                            m.addConstr(gp.quicksum(w_r[r] * f[i, j, r, t, s] for r in range(R)) <= K_ijt[i][j][t], 
+                                        name="FlowCapacity_%s_%s_%s_%s" % (i, j, t, s))
+
+        m.update()
+
+        objective = gp.quicksum(
+            P[s] * (
+                gp.quicksum(
+                    gp.quicksum(p_i[i] * U[i, t, s] for i in range(V)) for t in range(t_tilda, T)
+                ) +
+                gp.quicksum(
+                    gp.quicksum(
+                        gp.quicksum(cost_ir[i][r] * f[i, j, r, t, s] for i in V0 for j in range(V) if (i, j) in A) +
+                        gp.quicksum(m_ij[i][j] * f[i, j, r, t, s] for i in range(V) for j in range(V) if (i, j) in A)
+                        for r in range(R)
+                    ) for t in range(t_tilda, T)
+                )
+            ) for s in sce
+        )
+
+        m.setObjective(objective, GRB.MINIMIZE)
+
+        m.setParam("OutputFlag", 0)
+        m.update()
+
+        return m, I
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def RH_model_creator(self, t_bar, sol):
 
@@ -307,7 +475,6 @@ class TwoStageSPModel:
         V3 = self.network_processor.V3
         R = self.network_processor.R
         T = self.network_processor.T
-        T_Bef = self.network_processor.T_Bef
         A = self.network_processor.A
         K_ijt = self.network_processor.K_ijt
         w_r = self.network_processor.w_r
@@ -329,7 +496,7 @@ class TwoStageSPModel:
         for i in range(V):
             for r in range(R):
                 for t in range(t_bar, T):
-                    I[i, r, t] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="I_%s_%s_%s" % (i, r, t))
+                    I[i, r, t] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"I_{i}_{r}_{t}")
         
         # Define second-stage decision variables
         U = {}  # Demand shortage at location i at time period t in scenario s
@@ -337,162 +504,134 @@ class TwoStageSPModel:
         for i in range(V):
             for t in range(t_bar, T):
                 for s in sce:  # Iterate directly over the scenario set (e.g., 0 and 1)
-                    U[i, t, s] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="U_%s_%s_%s" % (i, t, s))
+                    U[i, t, s] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"U_{i}_{t}_{s}")
         
         S = {}  # Demand satisfied at location i at time period t in scenario s
         
         for i in range(V):
             for t in range(t_bar, T):
                 for s in sce:  # Iterate directly over the scenario set
-                    S[i, t, s] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="S_%s_%s_%s" % (i, t, s))
+                    S[i, t, s] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"S_{i}_{t}_{s}")
         
         f = {}  # Quantity of commodity r traveling on link (i, j) at time period t in scenario s
         
-        for i in range(V):
-            for j in range(V):
-                if (i, j) in A:  # Only define f_ijrt^s if (i, j) is a valid link
-                    for r in range(R):
-                        for t in range(t_bar, T):
-                            for s in sce:  # Iterate directly over the scenario set
-                                f[i, j, r, t, s] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="f_%s_%s_%s_%s_%s" % (i, j, r, t, s))
+        for (i, j) in A:  # Only define if (i, j) is a valid link
+            for r in range(R):
+                for t in range(t_bar, T):
+                    for s in sce:  # Iterate directly over the scenario set
+                        f[i, j, r, t, s] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}_{r}_{t}_{s}")
 
         if t_bar == 0:
             #Starting Value of I[t=0]
             for i in range(V):
                 for r in range(R):
-                    model.addConstr(I[i,r,0]==I_ir0[i][r])
+                    for s in sce:
+                        model.addConstr(I[i, r, 0] == I_ir0[i][r] - gp.quicksum(f[i, j, r, 0, s] for j in range(V) if (i, j) in A) - S[i, 0, s],
+                                        name=f"InitialInventory_{i}_{r}_{s}") ## WATCH OUT for g_r
 
             # Initial demand shortage for all locations and scenarios at time period t=0
             for i in range(V):
                 for s in sce:
-                    model.addConstr(U[i, 0, s] == self.demand_processor.d_its[(i, 0, s)], name="InitialDemandShortage_%s_%s" % (i, s))
-
-            # Inventory update constraint for all locations, commodities, time periods (except last), and scenarios
-            for i in range(V):
-                for r in range(R):
-                    for t in range(t_bar, T - 1):
-                        for s in sce:
-                            outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
-                            incoming_flow = gp.quicksum(f[j, i, r, t - t_ijt[j][i] + 1, s] for j in range(V) if (j, i) in A and t - t_ijt[j][i] + 1 >= 0)
-                            
-                            # Inventory update constraint for shelters
-                            if i in V1:
-                                model.addConstr(
-                                    I[i, r, t + 1] == I[i, r, t] - outgoing_flow + incoming_flow - S[i, t, s] * g_shelter[r],
-                                    name="InventoryUpdate_Shelter_%s_%s_%s_%s" % (i, r, t, s)
-                                )
-                            # Inventory update constraint for pods
-                            elif i in V3:
-                                model.addConstr(
-                                    I[i, r, t + 1] == I[i, r, t] - outgoing_flow + incoming_flow - S[i, t, s] * g_pod[r],
-                                    name="InventoryUpdate_Pod_%s_%s_%s_%s" % (i, r, t, s)
-                                )
-                            # Inventory update constraint for warehouses and RSAs
-                            else:
-                                model.addConstr(
-                                    I[i, r, t + 1] == I[i, r, t] - outgoing_flow + incoming_flow,
-                                    name="InventoryUpdate_%s_%s_%s_%s" % (i, r, t, s))
+                    model.addConstr(U[i, 0, s] == self.demand_processor.d_its[(i, 0)] - S[i, 0, s], name=f"InitialDemandShortage_{i}_{s}")
 
         else:
-            # Updated initial inventory
-            for i in range(V):
-                for r in range(R):
-                    model.addConstr(
-                        I[i, r, t_bar] == sol["I"][i, r, t_bar],
-                        name=f"InitInv_{i}_{r}_{t_bar}")
+            # # Updated initial inventory
+            # for i in range(V):
+            #     for r in range(R):
+            #         model.addConstr(I[i, r, t_bar] == sol["I"][i, r, t_bar - 1], name=f"InitInv_{i}_{r}_{t_bar-1}")
                     
-            # Updated initial unmet demand        
+            # Initialize unmet demand at t_bar using realized demand and satisfied demand S.       
             for i in range(V):
                 for s in sce:
-                    model.addConstr(
-                        U[i, t_bar, s] == sol["U"][i, t_bar],
-                        name=f"InitUnmet_{i}_{s}_{t_bar}")
-                    
-            # Updated flow for all locations, commodities, time periods (except last), and scenarios
+                    model.addConstr(U[i, t_bar, s] == sol["U"][i, t_bar - 1] + self.demand_processor.d_its[(i, t_bar)] - S[i, t_bar, s], name=f"InitUnmet_{i}_{s}_{t_bar}")
+
+            # Updated flow for all locations, commodities, and scenarios only for t_bar
             for i in range(V):
                 for r in range(R):
-                    for t in range(t_bar, T - 1):
-                        for s in sce:
-                            outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
-                            
-                            # Regular incoming flow (from inside RH window)
-                            incoming_flow_regular = gp.quicksum(
-                                f[j, i, r, t - (t_ijt[j][i] + 1), s]
-                                for j in range(V)
-                                if (j, i) in A and t - (t_ijt[j][i] + 1) >= t_bar)
-                            
-                            incoming_flow_fixed = gp.quicksum(
-                            self.fixed_flow_all.get((j, i, r, t_prime, s), 0)
-                            for j in range(V)
-                            for t_prime in range(t_bar)  # Flows made before t_bar
-                            if (j, i) in A and t_prime + (t_ijt[j][i] + 1) == t)
+                    for s in sce:
+                        outgoing_flow = gp.quicksum(f[i, j, r, t_bar, s] for j in range(V) if (i, j) in A)
+                        
+                        # Regular incoming flow (from inside RH window)
+                        incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime, s] for j in range(V) for t_prime in range(t_bar, T)
+                                                            if (j, i) in A and t_prime == t_bar - (t_ijt[j][i] + 1))
+                        
+                        incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_bar)
+                                                            if (j, i) in A and t_prime == t_bar - (t_ijt[j][i] + 1))
 
-                            total_incoming = incoming_flow_regular + incoming_flow_fixed
+                        total_incoming = incoming_flow_regular + incoming_flow_fixed
 
-                            # Inventory update constraint for shelters
-                            if i in V1:
-                                model.addConstr(
-                                    I[i, r, t + 1] == I[i, r, t] - outgoing_flow + total_incoming - S[i, t, s] * g_shelter[r],
-                                    name="InventoryUpdate_Shelter_%s_%s_%s_%s" % (i, r, t, s)
-                                )
-                            # Inventory update constraint for pods
-                            elif i in V3:
-                                model.addConstr(
-                                    I[i, r, t + 1] == I[i, r, t] - outgoing_flow + total_incoming - S[i, t, s] * g_pod[r],
-                                    name="InventoryUpdate_Pod_%s_%s_%s_%s" % (i, r, t, s)
-                                )
-                            # Inventory update constraint for warehouses and RSAs
-                            else:
-                                model.addConstr(
-                                    I[i, r, t + 1] == I[i, r, t] - outgoing_flow + total_incoming,
-                                    name="InventoryUpdate_%s_%s_%s_%s" % (i, r, t, s))
+                        # Inventory update constraint for shelters
+                        if i in V1:
+                            model.addConstr(I[i, r, t_bar] == sol["I"][i, r, t_bar - 1] - outgoing_flow + total_incoming - S[i, t_bar, s] * g_shelter[r], 
+                                            name=f"InventoryUpdate_Shelter_{i}_{r}_{t_bar}_{s}")
+                        # Inventory update constraint for pods
+                        elif i in V3:
+                            model.addConstr(I[i, r, t_bar] == sol["I"][i, r, t_bar - 1] - outgoing_flow + total_incoming - S[i, t_bar, s] * g_pod[r],
+                                            name=f"InventoryUpdate_Pod_{i}_{r}_{t_bar}_{s}")
+                        # Inventory update constraint for warehouses and RSAs
+                        else:
+                            model.addConstr(I[i, r, t_bar] == sol["I"][i, r, t_bar - 1] - outgoing_flow + total_incoming, 
+                                            name=f"InventoryUpdate_{i}_{r}_{t_bar}_{s}")
 
+                    # # Debug print only when t_bar == 6
+                    # if t_bar == 5:
+                    #     d_val = self.demand_processor.d_its[(i, t_bar)]
+                    #     s_val = sol["S"][i, t_bar]
+                    #     print(f"t_bar={t_bar}, i={i}, s={s}: d_its={d_val}, S={s_val}, U = {d_val - s_val}")
+                                
+        # Updated flow for all locations, commodities, time periods (except last), and scenarios
+        for i in range(V):
+            for r in range(R):
+                for t in range(t_bar + 1, T):
+                    for s in sce:
+                        outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
+                        
+                        # Regular incoming flow (from inside RH window)
+                        incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime, s] for j in range(V) for t_prime in range(t_bar, T)
+                                                            if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
+                        
+                        incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_bar)
+                                                            if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
+
+                        total_incoming = incoming_flow_regular + incoming_flow_fixed
+
+                        # Inventory update constraint for shelters
+                        if i in V1:
+                            model.addConstr(I[i, r, t] == I[i, r, t - 1] - outgoing_flow + total_incoming - S[i, t, s] * g_shelter[r], 
+                                            name=f"InventoryUpdate_Shelter_{i}_{r}_{t}_{s}")
+                        # Inventory update constraint for pods
+                        elif i in V3:
+                            model.addConstr(I[i, r, t] == I[i, r, t - 1] - outgoing_flow + total_incoming - S[i, t, s] * g_pod[r],
+                                            name=f"InventoryUpdate_Pod_{i}_{r}_{t}_{s}")
+                        # Inventory update constraint for warehouses and RSAs
+                        else:
+                            model.addConstr(I[i, r, t] == I[i, r, t - 1] - outgoing_flow + total_incoming, 
+                                            name=f"InventoryUpdate_{i}_{r}_{t}_{s}")    
 
         # Update demand shortage for all locations, time periods (except t=0), and scenarios
         for i in range(V):
             for t in range(t_bar + 1, T):
                 for s in sce:
-                    model.addConstr(
-                        U[i, t, s] == U[i, t - 1, s] - S[i, t, s] + self.demand_processor.d_its[(i, t, s)],
-                        name=f"DemandShortageUpdate_{i}_{t}_{s}")
+                    model.addConstr(U[i, t, s] == U[i, t - 1, s] - S[i, t, s] + self.demand_processor.d_its[(i, t, s)], name=f"DemandShortageUpdate_{i}_{t}_{s}")
 
                     
         # Flow capacity constraint for all links, time periods, and scenarios
-        for i in range(V):
-            for j in range(V):
-                if (i, j) in A:  # Only consider valid links in A
-                    for t in range(t_bar, T):
-                        for s in sce:
-                            # Check if the capacity for this (i, j, t) exists in K_ijt
-                            #if i in K_ijt and j in K_ijt[i] and t in K_ijt[i][j]:
-                                model.addConstr(
-                                    gp.quicksum(w_r[r] * f[i, j, r, t, s] for r in range(R)) <= K_ijt[i][j][t],
-                                    name="FlowCapacity_%s_%s_%s_%s" % (i, j, t, s))
+        for (i, j) in A:  # Only consider valid links in A
+            for t in range(t_bar, T):
+                for s in sce:
+                    model.addConstr(gp.quicksum(w_r[r] * f[i, j, r, t, s] for r in range(R)) <= K_ijt[i][j][t], name=f"FlowCapacity_{i}_{j}_{t}_{s}")
                                 
         # Add nonanticipativity constraints: all scenarios must match scenario 0 at t_bar
-        for i in range(V):
-            for j in range(V):
-                if (i, j) in A:
-                    for r in range(R):
-                        for s in range(1, self.num_sce):  # skip s=0 (used as reference)
-                            model.addConstr(
-                                f[i, j, r, t_bar, s] == f[i, j, r, t_bar, 0],
-                                name=f"NonAntic_f_{i}_{j}_{r}_{t_bar}_{s}")
-
+        for (i, j) in A:
+            for r in range(R):
+                for s in range(1, self.num_sce): # skip s=0 (used as reference) 
+                    model.addConstr(f[i, j, r, t_bar, s] == f[i, j, r, t_bar, 0], name=f"NonAntic_f_{i}_{j}_{r}_{t_bar}_{s}")
                                 
-        objective = gp.quicksum(
-            P[s] * (
-                gp.quicksum(
-                    gp.quicksum(p_i[i] * U[i, t, s] for i in range(V)) for t in range(t_bar, T)
-                ) +
-                gp.quicksum(
-                    gp.quicksum(
-                        gp.quicksum(cost_ir[i][r] * f[i, j, r, t, s] for i in V0 for j in range(V) if (i, j) in A) +
-                        gp.quicksum(m_ij[i][j] * f[i, j, r, t, s] for i in range(V) for j in range(V) if (i, j) in A)
-                        for r in range(R)
-                    ) for t in range(t_bar, T)
-                )
-            ) for s in sce)
+        objective = gp.quicksum(P[s] * 
+                                (gp.quicksum(gp.quicksum(p_i[i] * U[i, t, s] for i in range(V)) for t in range(t_bar, T)) + 
+                                 gp.quicksum(gp.quicksum(gp.quicksum(cost_ir[i][r] * f[i, j, r, t, s] for i in V0 for j in range(V) if (i, j) in A) + 
+                                                         gp.quicksum(m_ij[i][j] * f[i, j, r, t, s] for i in range(V) for j in range(V) if (i, j) in A) for r in range(R))
+                                                         for t in range(t_bar, T))) for s in sce)
             
         model.setObjective(objective, GRB.MINIMIZE)
         model.setParam("OutputFlag", 0)
@@ -511,7 +650,7 @@ class TwoStageSPModel:
         # Check solution status
         if model.status != GRB.OPTIMAL:
             print(f"Warning: Optimization ended with status {model.status}")
-            return None, None
+            exit(0)
 
         # Extract objective value
         obj_val = model.objVal
@@ -522,7 +661,7 @@ class TwoStageSPModel:
 
         if is_terminal:
             variable_values = {
-                "I": {(i, r, t): var.X for (i, r, t), var in variables["I"].items()},
+                "I": {(i, r, t): var.X for (i, r, t), var in variables["I"].items()}, # variables["I"] is a dictionary of decision variables (not the optimal values!)
                 "U": {(i, t): var.X for (i, t), var in variables["U"].items()},
                 "S": {(i, t): var.X for (i, t), var in variables["S"].items()},
                 "f": {(i, j, r, t): var.X for (i, j, r, t), var in variables["f"].items()},
@@ -538,7 +677,7 @@ class TwoStageSPModel:
         # Return everything
         return obj_val, variable_values
 
-    def RH_sol_creator(self, variable_values, t_bar, s_realized):
+    def RH_sol_creator(self, variable_values, t_bar):
         """
         Extracts inventory and unmet demand values at time t_bar + 1 from the solved model for the realized scenario. 
         Updates the solution dictionary (sol) with these values and returns it
@@ -546,28 +685,28 @@ class TwoStageSPModel:
         """
         sol = {}
 
-        next_t = t_bar + 1
+        # Extract inventory at time t_bar (end of current roll) to use as initial inventory in next roll
+        sol["I"] = {(i, r, t_bar): val for (i, r, t), val in variable_values["I"].items() if t == t_bar}
 
-        # Inventory at t_bar
-        sol["I"] = {
-            (i, r, next_t): val
-            for (i, r, t), val in variable_values["I"].items()
-            if t == next_t
-        }
+        # Extract satisfied demand S at time t = t_bar + 1 (start of next roll).
+        # Since S_it^s is scenario-independent only at the first time period of each roll (i.e., S_it^s = S_it ∀s),
+        # we only store one copy from scenario s = 0.
+        # sol["S"] = {(i, next_t): val for (i, t, s), val in variable_values["S"].items() if t == t_bar and s == 0}
 
-        # Unmet demand at t_bar for the realized scenario only
-        sol["U"] = {
-            (i, next_t): val
-            for (i, t, s), val in variable_values["U"].items()
-            if t == next_t and s == s_realized
-        }
+        sol["U"] = {(i, t_bar): val for (i, t, s), val in variable_values["U"].items() if t == t_bar and s == 0}
+
+        # # Print for debugging
+        # if next_t == 4:
+        # for (i, t, s), val in variable_values["S"].items():
+        #     if t == t_bar:
+        #         print(f"S[{i}, {t_bar}, {s}] = {val}")
 
         return sol
 
-    def RH_terminal_model(self, sol, s_t, sample_paths):
+    def RH_terminal_model(self, sol):
         """
         Builds and returns the deterministic terminal-stage model for the rolling horizon framework,
-        covering the period from t_L + 1 to T after hurricane landfall.
+        covering the period from t_L to T after hurricane landfall.
         """
 
         V = self.network_processor.V
@@ -576,7 +715,6 @@ class TwoStageSPModel:
         V3 = self.network_processor.V3
         R = self.network_processor.R
         T = self.network_processor.T
-        T_Bef = self.network_processor.T_Bef
         A = self.network_processor.A
         K_ijt = self.network_processor.K_ijt
         w_r = self.network_processor.w_r
@@ -598,19 +736,19 @@ class TwoStageSPModel:
         
         for i in range(V):
             for r in range(R):
-                for t in range(t_L + 1, T):
+                for t in range(t_L, T):
                     I[i, r, t] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"I_{i}_{r}_{t}")
         
         U = {}
         
         for i in range(V):
-            for t in range(t_L + 1, T):
+            for t in range(t_L, T):
                 U[i, t] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"U_{i}_{t}")
         
         S = {}
         
         for i in range(V):
-            for t in range(t_L + 1, T):
+            for t in range(t_L, T):
                 S[i, t] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"S_{i}_{t}")
         
         f = {} 
@@ -619,95 +757,83 @@ class TwoStageSPModel:
             for j in range(V):
                 if (i, j) in A:
                     for r in range(R):
-                        for t in range(t_L + 1, T):
+                        for t in range(t_L, T):
                             f[i, j, r, t] = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}_{r}_{t}")
 
         # Constraints
-        # Initial conditions from sol
+        # # Initial conditions from sol
+        # for i in range(V):
+        #     for r in range(R):
+        #         model.addConstr(I[i, r, t_L] == sol["I"][i, r, t_L - 1], name=f"InitInv_Terminal_{i}_{r}_{t_L}")
+
+        for i in range(V):
+            model.addConstr(U[i, t_L] == sol["U"][i, t_L - 1] + self.demand_processor.d_its[(i, t_L)] - S[i, t_L], name=f"InitUnmet_Terminal_{i}_{t_L}")
+
+        # Flow balance only for t_L
         for i in range(V):
             for r in range(R):
-                model.addConstr(
-                    I[i, r, t_L + 1] == sol["I"][i, r, t_L + 1],
-                    name=f"InitInv_Terminal_{i}_{r}_{t_L + 1}")
+                outgoing_flow = gp.quicksum(f[i, j, r, t_L] for j in range(V) if (i, j) in A)
 
-        for i in range(V):
-            model.addConstr(
-                U[i, t_L + 1] == sol["U"][i, t_L + 1],
-                name=f"InitUnmet_Terminal_{i}_{t_L + 1}")
+                incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime] for j in range(V) for t_prime in range(t_L, T) 
+                                                    if (j, i) in A and t_prime == t_L - (t_ijt[j][i] + 1))
+                
+                incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_L) 
+                                                    if (j, i) in A and t_prime == t_L - (t_ijt[j][i] + 1))
+
+                total_incoming = incoming_flow_regular + incoming_flow_fixed
+
+                # Inventory update constraint for shelters
+                if i in V1:
+                    model.addConstr(I[i, r, t_L] == sol["I"][i, r, t_L - 1] - outgoing_flow + total_incoming - S[i, t_L] * g_shelter[r], 
+                                    name=f"InventoryUpdate_Shelter_{i}_{r}_{t}")
+                # Inventory update constraint for pods
+                elif i in V3:
+                    model.addConstr(I[i, r, t_L] == sol["I"][i, r, t_L - 1] - outgoing_flow + total_incoming - S[i, t_L] * g_pod[r],
+                                    name=f"InventoryUpdate_Pod_{i}_{r}_{t}")
+                # Inventory update constraint for warehouses and RSAs
+                else:
+                    model.addConstr(I[i, r, t_L] == sol["I"][i, r, t_L - 1] - outgoing_flow + total_incoming,
+                                    name=f"InventoryUpdate_{i}_{r}_{t}")
             
-        # Flow balance
+        # Flow balance from t_L+1 to T
         for i in range(V):
-                for r in range(R):
-                    for t in range(t_L + 1, T - 1):
-                        outgoing_flow = gp.quicksum(f[i, j, r, t] for j in range(V) if (i, j) in A)
-                        
-                        # # Regular incoming flow (from inside RH window)
-                        # incoming_flow_regular = gp.quicksum(
-                        #     f[j, i, r, t - (t_ijt[j][i] + 1)]
-                        #     for j in range(V)
-                        #     if (j, i) in A and t - (t_ijt[j][i] + 1) >= t_L)
+            for r in range(R):
+                for t in range(t_L + 1, T):
+                    outgoing_flow = gp.quicksum(f[i, j, r, t] for j in range(V) if (i, j) in A)
 
-                        incoming_flow_regular = gp.quicksum(
-                            f[j, i, r, t_prime]
-                            for j in range(V)
-                            if (j, i) in A
-                            for t_prime in range(t_L + 1, t)  # only valid terminal time range
-                            if t_prime + (t_ijt[j][i] + 1) == t)
-                        
-                        incoming_flow_fixed = gp.quicksum(
-                        self.fixed_flow_all.get((j, i, r, t_prime), 0)
-                        for j in range(V)
-                        for t_prime in range(t_L)  # Flows made before t_L
-                        if (j, i) in A and t_prime + (t_ijt[j][i] + 1) == t)
-
-                        total_incoming = incoming_flow_regular + incoming_flow_fixed
-
-                        # Inventory update constraint for shelters
-                        if i in V1:
-                            model.addConstr(
-                                I[i, r, t + 1] == I[i, r, t] - outgoing_flow + total_incoming - S[i, t] * g_shelter[r],
-                                name="InventoryUpdate_Shelter_%s_%s_%s" % (i, r, t)
-                            )
-                        # Inventory update constraint for pods
-                        elif i in V3:
-                            model.addConstr(
-                                I[i, r, t + 1] == I[i, r, t] - outgoing_flow + total_incoming - S[i, t] * g_pod[r],
-                                name="InventoryUpdate_Pod_%s_%s_%s" % (i, r, t)
-                            )
-                        # Inventory update constraint for warehouses and RSAs
-                        else:
-                            model.addConstr(
-                                I[i, r, t + 1] == I[i, r, t] - outgoing_flow + total_incoming,
-                                name="InventoryUpdate_%s_%s_%s" % (i, r, t))
-
-        for i in range(V):
-            for t in range(t_L + 2, T):  # T is exclusive in range, so this covers t = t_L+2 to T-1
-                model.addConstr(
-                    U[i, t] == U[i, t - 1] - S[i, t] + self.demand_processor.d_its[(i, t)], # realized demand using s_t
-                    name=f"DemandShortageUpdate_Terminal_{i}_{t}")
-
-        for i in range(V):
-            for j in range(V):
-                if (i, j) in A:
-                    for t in range(t_L + 1, T):  # T is exclusive, so this gives t_L+1 to T-1
-                        model.addConstr(
-                            gp.quicksum(w_r[r] * f[i, j, r, t] for r in range(R)) <= K_ijt[i][j][t],
-                            name=f"FlowCapacity_Terminal_{i}_{j}_{t}")
-
+                    incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime] for j in range(V) for t_prime in range(t_L, T) 
+                                                        if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
                     
-        # Objective function
-        objective = (
-            gp.quicksum(p_i[i] * U[i, t] for i in range(V) for t in range(t_L + 1, T)) +
-            gp.quicksum(
-                cost_ir[i][r] * f[i, j, r, t]
-                for i in V0 for j in range(V) if (i, j) in A
-                for r in range(R) for t in range(t_L + 1, T)
-            ) +
-            gp.quicksum(
-                m_ij[i][j] * f[i, j, r, t]
-                for i in range(V) for j in range(V) if (i, j) in A
-                for r in range(R) for t in range(t_L + 1, T)))
+                    incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_L) 
+                                                      if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
 
+                    total_incoming = incoming_flow_regular + incoming_flow_fixed
+
+                    # Inventory update constraint for shelters
+                    if i in V1:
+                        model.addConstr(I[i, r, t] == I[i, r, t-1] - outgoing_flow + total_incoming - S[i, t] * g_shelter[r], 
+                                        name=f"InventoryUpdate_Shelter_{i}_{r}_{t}")
+                    # Inventory update constraint for pods
+                    elif i in V3:
+                        model.addConstr(I[i, r, t] == I[i, r, t-1] - outgoing_flow + total_incoming - S[i, t] * g_pod[r],
+                                        name=f"InventoryUpdate_Pod_{i}_{r}_{t}")
+                    # Inventory update constraint for warehouses and RSAs
+                    else:
+                        model.addConstr(I[i, r, t] == I[i, r, t-1] - outgoing_flow + total_incoming,
+                                        name=f"InventoryUpdate_{i}_{r}_{t}")
+
+        for i in range(V):
+            for t in range(t_L + 1, T): # Since the demand is the same across all scenarios for terminal stage, we just use the first scenario as reference
+                model.addConstr(U[i, t] == U[i, t - 1] - S[i, t] + self.demand_processor.d_its[(i, t, 0)], name=f"DemandShortageUpdate_Terminal_{i}_{t}")
+
+        for (i, j) in A:
+            for t in range(t_L, T):
+                model.addConstr(gp.quicksum(w_r[r] * f[i, j, r, t] for r in range(R)) <= K_ijt[i][j][t], name=f"FlowCapacity_Terminal_{i}_{j}_{t}")
+
+        # Objective function
+        objective = (gp.quicksum(p_i[i] * U[i, t] for i in range(V) for t in range(t_L, T)) + 
+                     gp.quicksum(cost_ir[i][r] * f[i, j, r, t] for i in V0 for j in range(V) if (i, j) in A for r in range(R) for t in range(t_L, T)) + 
+                     gp.quicksum(m_ij[i][j] * f[i, j, r, t] for i in range(V) for j in range(V) if (i, j) in A for r in range(R) for t in range(t_L, T)))
 
         model.setObjective(objective, GRB.MINIMIZE)
         model.setParam("OutputFlag", 0)
@@ -715,10 +841,9 @@ class TwoStageSPModel:
 
         return model, I, U, S, f
     
-    def calculate_cost_rh(self, variable_values, t_bar, s_t):
+    def calculate_cost_rh(self, variable_values, t_bar):
         """
-        Calculates the total cost (penalty + transportation) for the deterministic terminal model
-        Returns Total cost at time t_bar.
+        Returns total cost (penalty + transportation) at time t_bar.
         """
         V = self.network_processor.V
         V0 = self.network_processor.V0
@@ -727,22 +852,23 @@ class TwoStageSPModel:
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
         m_ij = self.network_processor.m_ij
+        P = self.demand_processor.P
+        sce = range(self.num_sce)  # Number of scenarios
 
         # Penalty cost for unmet demand
-        penalty_cost = sum(
-            p_i[i] * variable_values["U"].get((i, t_bar, s_t), 0) for i in range(V))
+        penalty_cost = sum(P[s] * sum(p_i[i] * variable_values["U"][(i, t_bar, s)] for i in range(V)) for s in sce)
 
-        # Transportation cost from source nodes
-        transport_cost = sum(
-            cost_ir[i][r] * variable_values["f"].get((i, j, r, t_bar, s_t), 0)
-            for i in V0 for j in range(V) for r in range(R) if (i, j) in A)
+        # Procurement cost
+        proc_cost = sum(P[s] * sum(cost_ir[i][r] * variable_values["f"][(i, j, r, t_bar, s)] for i in V0 for j in range(V) for r in range(R) if (i, j) in A) for s in sce)
 
-        # Additional per-mile transportation cost
-        transport_cost += sum(
-            m_ij[i][j] * variable_values["f"].get((i, j, r, t_bar, s_t), 0)
-            for i in range(V) for j in range(V) for r in range(R) if (i, j) in A)
+        # Transportation cost
+        transport_cost = sum(P[s] * sum(m_ij[i][j] * variable_values["f"][(i, j, r, t_bar, s)] for i in range(V) for j in range(V) for r in range(R) if (i, j) in A) for s in sce)
 
-        return penalty_cost + transport_cost
+        total = penalty_cost + proc_cost + transport_cost
+
+        print(f"Cost at t_bar={t_bar} = {total:.2f}")
+
+        return total
 
     def calculate_cost_terminal(self, variable_values, t_L):
         """
@@ -771,7 +897,7 @@ class TwoStageSPModel:
 
         return penalty_cost + transport_cost
 
-    def RH_evaluation(self, sample_paths, demand_processor, network_processor, start_index=0, num_paths=None):
+    def RH_evaluation(self, sample_paths, demand_processor, network_processor):
         """
         Evaluates the rolling horizon model over multiple out-of-sample sample paths.
         For each sample path:
@@ -782,18 +908,13 @@ class TwoStageSPModel:
 
         Returns the average cost and the individual total costs for all sample paths.
         """
+        start_time = time.time()
+
         from demand_generation import data, in_sample
 
+        nbOS = demand_processor.nbOS
         T = network_processor.T
-        P = self.demand_processor.P
-        V = self.network_processor.V
-        V0 = self.network_processor.V0
-        R = self.network_processor.R
-        A = self.network_processor.A
-        #nbOS = demand_processor.nbOS
         t_L = network_processor.t_L
-
-        start_time = time.time()
 
         # Ensure PoD location info is loaded (used for post-landfall PoD demand)
         if not hasattr(demand_processor, "pod_info_df"):
@@ -801,31 +922,23 @@ class TwoStageSPModel:
 
         # Load sample paths from CSV
         OS_paths_df = pd.read_csv(sample_paths)
-
-        # New 
-        # Compute slice limits
-        start_row = start_index
-        end_row   = None if num_paths is None else start_index + num_paths
-        # Grab the requested chunk
-        OS_paths = OS_paths_df.iloc[start_row : end_row].values
-        # Set nbOS to the number of paths actually loaded
-        nbOS = OS_paths.shape[0]
-        demand_processor.nbOS = nbOS          # keep downstream logic consistent
-        #OS_paths = OS_paths_df.values
+        OS_paths = OS_paths_df.values
         total_costs = np.zeros(nbOS)  # Total cost for each sample path
 
         for k in range(nbOS):
             print("Sample path=", k)
-            sample_path_row = OS_paths[k]  # 1D array for path k
-            self.fixed_flow_all = {}
+            sample_path_row = OS_paths[k]  # Example: sample_path_row[t_bar] gives the hurricane's realized state at t_bar
+            self.fixed_flow = {}
             t_bar = 0
             sol = {}  # Initial state
             cost_k = 0  # Total cost for sample path k
 
             # Rolling loop over time steps
             while t_bar <= t_L:
-                print("t_bar=", t_bar)
+                # print("t_bar=", t_bar)
+                demand_processor.d_its = {} # Clear demand generated in the previous roll.
                 s_t = eval(sample_path_row[t_bar])  # Converts '(-23.55, 0)' to (-23.55, 0)
+                # print("s_t:", s_t)
 
                 # Generate the demand at t_bar only based on the realized current state of the hurricane
                 demand_processor.generate_current_demand(t_bar, s_t, network_processor, data, solution_method=4)
@@ -833,65 +946,97 @@ class TwoStageSPModel:
                 # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
                 # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
                 in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
-
-                # Identify which in-sample scenario matches the realized state s_t
-                s_realized = None
-                for s in range(self.num_sce):
-                    if tuple(in_sample_paths[s, t_bar]) == s_t:
-                        s_realized = s
-                        break
-
-                if s_realized is None:
-                    raise ValueError(f"No in-sample scenario matches realized state s_t = {s_t} at t_bar = {t_bar}")
+                # print("in_sample_paths:", in_sample_paths)
 
                 # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
-                demand_processor.generate_future_demand(t_bar, s_t, t_L, network_processor, in_sample_paths, solution_method=4)  
+                demand_processor.generate_future_demand(t_bar, t_L, network_processor, in_sample_paths, solution_method=4)  
 
                 demand_processor.generate_post_landfall_demand(t_L, in_sample_paths, network_processor, solution_method=4)
 
-                # Build the model for current roll
-                model, I, U, S, f = self.RH_model_creator(t_bar, sol)
+                # # Print for debugging
+                # if t_bar == 9: 
+                #     print("Current demand:")         
+                #     for i in range(network_processor.V):
+                #         demand_val = self.demand_processor.d_its[(i, t_bar)]
+                #         print(f"d_{i},{t_bar} = {demand_val}")
+
+                #     print("Future demand:") 
+                #     for s in range(self.num_sce):
+                #         for t in range(t_bar + 1, t_L + 1):
+                #             for i in range(network_processor.V):
+                #                 val = self.demand_processor.d_its[(i, t, s)]
+                #                 if val > 1e-6:
+                #                     print(f"d_{i},{t},{s} = {val}")
+
+                #     print("Post landfall demand:") 
+                #     for s in range(self.num_sce):
+                #         for t in network_processor.T_Aft:
+                #             for i in network_processor.V3:
+                #                 val = self.demand_processor.d_its[(i, t, s)]
+                #                 # if abs(val) > 1e-6:
+                #                 print(f"d_{i},{t},{s} = {val}")
+
+                if t_bar < t_L:
+                    # Build the model for current roll
+                    model, I, U, S, f = self.RH_model_creator(t_bar, sol)
+                    # if t_bar == 8:
+                    #     model.write(f"RH_model_t{t_bar}.lp")
+                    
+                    # Solve the model
+                    obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})           
+
+                    cost_k += self.calculate_cost_rh(variable_values, t_bar)
+
+                    # Save fixed flows (departed up to and including current t_bar) for the realized scenario only
+                    for (i, j, r, t, s), val in variable_values["f"].items():
+                        if t == t_bar:
+                            self.fixed_flow[(i, j, r, t)] = val
                 
-                # Solve the model
-                obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})
-                print(f"Objective value at time t_bar = {t_bar}: {obj_val}")
-
-                if obj_val is None:
-                    print(f"Skipping sample path {k} at t_bar={t_bar} due to infeasibility.")
-                    exit(0)              
-
-                cost_k += self.calculate_cost_rh(variable_values, t_bar, s_t)
-
-                # Accumulate fixed flows made at t_bar
-                for (i, j, r, t, s), val in variable_values["f"].items():
-                    if t == t_bar:
-                        self.fixed_flow_all[(i, j, r, t, s)] = val
+                    # # Print for debugging        
+                    # for (i, j, r, t, s), val in sorted(self.fixed_flow.items()):
+                    #     if abs(val) > 1e-6:
+                    #         print(f"f_{i},{j},{r},{t},{s} = {val}")
                 
-                # Update the rolling state for next time step (should be before model creation, because we need updated sol to create the model every time)
-                sol = self.RH_sol_creator(variable_values, t_bar, s_realized)
+                    # Update the rolling state for next time step
+                    sol = self.RH_sol_creator(variable_values, t_bar)
 
-                # Advance to the next time step
-                t_bar += 1
+                    # Advance to the next roll
+                    t_bar += 1
                 
-            # Now solve the terminal deterministic model from t_L + 1 to T - 1
-            terminal_model, I_term, U_term, S_term, f_term = self.RH_terminal_model(sol, s_t, sample_paths)
+                else:
+                    # Create the terminal deterministic model from t_L to T
+                    terminal_model, I_term, U_term, S_term, f_term = self.RH_terminal_model(sol)
+                    # model.write(f"RH_model_t{t_bar}.lp")
 
-            obj_term, var_term = self.RH_model_solver(terminal_model, {"I": I_term, "U": U_term, "S": S_term, "f": f_term})
-            print(f"Objective value from terminal model (t ∈ [{t_L + 1}, {T - 1}]): {obj_term}")
+                    # Solve the terminal deterministic model from t_L to T
+                    obj_term, var_term = self.RH_model_solver(terminal_model, {"I": I_term, "U": U_term, "S": S_term, "f": f_term})
 
-            if obj_term is not None:
-                cost_k += self.calculate_cost_terminal(var_term, t_L)
-            else:
-                print(f"Terminal stage for sample path {k} was infeasible.")
-                exit(0)   
+                    print(f"Cost at t_bar={t_bar} = {obj_term:.2f}")
+
+                    # The terminal model covers the entire remaining horizon from t_L to T
+                    cost_k += obj_term
+                    # cost_k += self.calculate_cost_terminal(var_term, t_L)
+                    t_bar += 1
 
             # Save the cost for this sample path
             total_costs[k] = cost_k
+            # Print the total cost for this path
+            print(f"Total cost for sample path {k} = {cost_k:.2f}")
 
-        # Average cost across all sample paths
-        average_cost = np.mean(total_costs)
+        mean_cost = np.mean(total_costs)
+        std_cost = np.std(total_costs, ddof=1)
+        ci_low = mean_cost - 1.96 * std_cost / np.sqrt(nbOS)
+        ci_high = mean_cost + 1.96 * std_cost / np.sqrt(nbOS)
+        CI = mean_cost - ci_low
+        print(f"\nRH Evaluation Results")
+        print(f"μ ± 1.96*σ/√NS = {mean_cost:.2f} ± {CI:.2f}")
+        print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
 
-        return average_cost, total_costs
+        end_time = time.time()
+        total_time = end_time - start_time
+        print(f"Total Execution Time for RH Evaluation: {total_time:.2f} seconds")
+
+        return mean_cost, total_costs, total_time
     
     def RH_evaluation_new(self, sample_paths, demand_processor, network_processor):
         """
@@ -933,7 +1078,7 @@ class TwoStageSPModel:
         for k in range(nbOS):
             print("Sample path=", k)
             sample_path_row = OS_paths[k]  # 1D array for path k
-            self.fixed_flow_all = {}
+            self.fixed_flow = {}
             t_bar = 0
             sol = {}  # Initial state
             cost_k = 0  # Total cost for sample path k
@@ -993,7 +1138,7 @@ class TwoStageSPModel:
                 # Accumulate fixed flows made at t_bar
                 for (i, j, r, t, s), val in variable_values["f"].items():
                     if t == t_bar:
-                        self.fixed_flow_all[(i, j, r, t, s)] = val
+                        self.fixed_flow[(i, j, r, t, s)] = val
                 
                 # Update the rolling state for next time step (should be before model creation, because we need updated sol to create the model every time)
                 sol = self.RH_sol_creator(variable_values, t_bar, s_realized)
@@ -1131,7 +1276,7 @@ class TwoStageSPModel:
         T = network_processor.T
 
         print("Sample path=", k)
-        self.fixed_flow_all = {}
+        self.fixed_flow = {}
         t_bar = 0
         sol = {}  # Initial state
         cost_k = 0  # Total cost for sample path k
@@ -1179,7 +1324,7 @@ class TwoStageSPModel:
             # Accumulate fixed flows made at t_bar
             for (i, j, r, t, s), val in variable_values["f"].items():
                 if t == t_bar:
-                    self.fixed_flow_all[(i, j, r, t, s)] = val
+                    self.fixed_flow[(i, j, r, t, s)] = val
             
             # Update the rolling state for next time step (should be before model creation, because we need updated sol to create the model every time)
             sol = self.RH_sol_creator(variable_values, t_bar, s_realized)
@@ -1344,12 +1489,10 @@ class TwoStageSPModel:
                 self.S_opt[i, t] = self.sub_opt.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"S_opt_{i}_{t}")
         
         # f: Quantity of commodity r traveling on link (i, j) at time period t in scenario s
-        for i in range(V):
-            for j in range(V):
-                if (i, j) in A:
-                    for r in range(R):
-                        for t in range(T):
-                            self.f_opt[i, j, r, t] = self.sub_opt.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_opt_{i}_{j}_{r}_{t}")
+        for (i, j) in A:
+            for r in range(R):
+                for t in range(T):
+                    self.f_opt[i, j, r, t] = self.sub_opt.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_opt_{i}_{j}_{r}_{t}")
 
         #Objective function
         self.sub_opt.setObjective(
@@ -1367,6 +1510,15 @@ class TwoStageSPModel:
                     for r in range(R)) for t in range(T)))
 
         #Constraints
+        self.pi_opt_init_flow = {}
+        for i in range(V):
+            for r in range(R):
+                # Add the constraint to the model
+                self.pi_opt_init_flow[i, r, 0] = self.sub_opt.addConstr(
+                    -gp.quicksum(self.f_opt[i, j, r, 0] for j in range(V) if (i, j) in A)
+                    - self.S_opt[i, 0] * (g_shelter[r] if i in V1 else g_pod[r] if i in V3 else 0) == 0,
+                    name=f"flow_conservation_opt_{i}_{r}_{t}")
+
         # Constraint for inventory flow balance with U and S
         self.pi_opt_inventory_balance_U = {}
         for i in range(V):
@@ -1383,26 +1535,24 @@ class TwoStageSPModel:
         self.pi_opt_flow_conservation = {}
         for i in range(V):
             for r in range(R):
-                for t in range(T - 1):
+                for t in range(1, T):
                     # Add the constraint to the model
                     self.pi_opt_flow_conservation[i, r, t] = self.sub_opt.addConstr(
                         -gp.quicksum(self.f_opt[i, j, r, t] for j in range(V) if (i, j) in A)
-                        + gp.quicksum(self.f_opt[j, i, r, t - t_ijt[j][i] + 1] for j in range(V) if (i, j) in A and t - t_ijt[j][i] + 1 >= 0)
+                        + gp.quicksum(self.f_opt[j, i, r, t - (t_ijt[j][i] + 1)] for j in range(V) if (j, i) in A and t - (t_ijt[j][i] + 1) >= 0)
                         - self.S_opt[i, t] * (g_shelter[r] if i in V1 else g_pod[r] if i in V3 else 0) == 0,
                         name=f"flow_conservation_opt_{i}_{r}_{t}")
         
         # Arc capacity constraint
         self.pi_opt_arc_capacity = {}
-        for i in range(V):
-            for j in range(V):
-                if (i, j) in A:  # Only consider valid links in A
-                    for t in range(T):
-                            if model_version == 2:
-                                self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= 0,
-                                    name=f"arc_capacity_opt_{i}_{j}_{t}")
-                            else:
-                                self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= -K_ijt[i][j][t],
-                                    name=f"arc_capacity_opt_{i}_{j}_{t}")
+        for (i, j) in A:  # Only consider valid links in A
+            for t in range(T):
+                if model_version == 2:
+                    self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= 0,
+                        name=f"arc_capacity_opt_{i}_{j}_{t}")
+                else:
+                    self.pi_opt_arc_capacity[i, j, t] = self.sub_opt.addConstr(-gp.quicksum(w_r[r] * self.f_opt[i, j, r, t] for r in range(R)) >= -K_ijt[i][j][t],
+                        name=f"arc_capacity_opt_{i}_{j}_{t}")
 
         self.sub_opt.setParam("OutputFlag", 0)
 
@@ -1819,9 +1969,16 @@ class TwoStageSPModel:
         V = self.network_processor.V
         R = self.network_processor.R
         T = self.network_processor.T
+        I_ir0 = self.network_processor.I_ir0
         d_its = self.demand_processor.d_its
         sce = range(len(P))
         mvpobj = 0  # Initialize the MVP objective value
+
+        # print("Original stochastic demand inside mvp_objective (d_its):")
+        # for key in sorted(d_its):
+        #     val = d_its[key]
+        #     if abs(val) >= 1e-6:
+        #         print(f"d_its{key} = {val:.2f}")
 
         # Loop over all scenarios to update RHS and solve the subproblem
         for s in sce:  
@@ -1837,17 +1994,23 @@ class TwoStageSPModel:
             # Update RHS of flow conservation constraints
             for i in range(V):
                 for r in range(R):
-                    for t in range(T - 1):
-                        self.pi_opt_flow_conservation[i, r, t].setAttr(GRB.Attr.RHS, I_mvp_values[i, r, t+1] - I_mvp_values[i, r, t])
+                    for t in range(1, T):
+                        self.pi_opt_flow_conservation[i, r, t].setAttr(GRB.Attr.RHS, I_mvp_values[i, r, t] - I_mvp_values[i, r, t-1])
 
+            for i in range(V):
+                for r in range(R):
+                    self.pi_opt_init_flow[i, r, 0].setAttr(GRB.Attr.RHS, I_mvp_values[i, r, 0] - I_ir0[i][r])
+            
+            
+            self.sub_opt.update()
             # Solve the optimality subproblem
             self.sub_opt.optimize()    
+            # print("objective:", self.sub_opt.objVal)
 
             if self.sub_opt.status == GRB.OPTIMAL:
                 # Update the optimal objective value for each scenario
-                mvpobj += self.sub_opt.objVal
-
-        # Compute the final MVP objective value
-        mvpobj /= len(sce)
+                mvpobj += P[s] * self.sub_opt.objVal
+            else:
+                print(f"Model for scenario{s} did NOT solve to optimality. Status code = {self.sub_opt.status}")
 
         return mvpobj

@@ -2,7 +2,7 @@ import json
 import numpy as np
 import pandas as pd
 import time
-np.random.seed(42)
+# np.random.seed(42)
 
 def load_transition_dict(path):
     with open(path, "r") as f:
@@ -85,4 +85,4 @@ def termination_check(iter, relative_gap, LB, start, cutviol_iter, params):
                 flag = 4
                 print("the LB is not making significant progress")
 
-    return flag, Elapsed
+    return flag, Elapsed, relative_gap

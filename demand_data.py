@@ -61,7 +61,7 @@ class DemandData:
         Generate deterministic shelter-level demand at time t_bar based on the realized hurricane state s_t.
         Updates self.d_its with demand values for shelters and zero demand for non-shelter locations.
         """
-        from demand_generation import in_sample, demand_deterministic_landfall, data
+        from demand_generation import demand_deterministic_landfall, data
         track_err, intensity = s_t
 
         # Step 1: Get PoD-level demand based on hurricane state
@@ -70,27 +70,35 @@ class DemandData:
 
         # Step 2: Distribute demand to shelters using inverse-distance weights
         demand_df = pd.DataFrame({t_bar: scaled_pod_demand})
-        shelter_demands = self.weights.multiply(demand_df[t_bar], axis=0).sum(axis=0).values
+        shelter_demands = self.weights.multiply(demand_df[t_bar], axis=0).sum(axis=0).values # Example: shelter_demands = [X, Y, Z] for 3 shelters
 
-        scenario_key = 0 if solution_method == 1 else s_t
+        if solution_method in [1, 8]:
+            scenario_key = 0
+            for shelter_idx, i in enumerate(network_processor.V1):
+                self.d_its[(i, t_bar, scenario_key)] = shelter_demands[shelter_idx]
 
-        for shelter_idx, i in enumerate(network_processor.V1):
-            self.d_its[(i, t_bar, scenario_key)] = shelter_demands[shelter_idx]
+            for i in range(network_processor.V):
+                if i not in network_processor.V1:
+                    self.d_its[(i, t_bar, scenario_key)] = 0.0
+        else:
 
-        for i in range(network_processor.V):
-            if i not in network_processor.V1:
-                self.d_its[(i, t_bar, scenario_key)] = 0.0
+            for shelter_idx, i in enumerate(network_processor.V1):
+                self.d_its[(i, t_bar)] = shelter_demands[shelter_idx]
 
-    def generate_future_demand(self, t_bar, s_t, t_L, network_processor, in_sample_paths, solution_method):
+            for i in range(network_processor.V):
+                if i not in network_processor.V1:
+                    self.d_its[(i, t_bar)] = 0.0
+
+    def generate_future_demand(self, t_bar, t_L, network_processor, in_sample_paths, solution_method):
         """
         Generate in-sample scenario-based shelter-level demand for t in [t_bar+1, t_L],
         using the current hurricane state s_t to create scenarios.
         
         Updates self.d_its with demand values for all in-sample scenarios.
         """
-        from demand_generation import in_sample, demand_deterministic_landfall, data
+        from demand_generation import demand_deterministic_landfall, data
 
-        if solution_method == 1:
+        if solution_method in [1, 8]:
             # Static 2SSP: use only the realized path (s=0)
             for t in range(t_bar + 1, t_L + 1):
                 track_err_s, intensity_s = in_sample_paths[0, t]
@@ -135,7 +143,7 @@ class DemandData:
         Updates self.d_its with demand values for PoD and non-PoD locations.
         """
 
-        if solution_method == 1:  # Static 2SSP
+        if solution_method in [1, 8]:  # Static 2SSP or WS policy
             # Just use the first (realized) path
             track_err_L, hurr_cat_L = in_sample_paths[0, t_L]
             cat = int(hurr_cat_L)
@@ -152,9 +160,7 @@ class DemandData:
 
                 mean = np.mean(network_processor.T_Aft)
                 std = self.std_pod
-                weights = np.array([
-                    np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
-                ])
+                weights = np.array([np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft])
                 weights /= weights.sum()
 
                 for idx, i in enumerate(network_processor.V3):
@@ -184,22 +190,18 @@ class DemandData:
 
                     mean = np.mean(network_processor.T_Aft)
                     std = self.std_pod
-                    weights = np.array([
-                        np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft
-                    ])
+                    weights = np.array([np.exp(-((t - mean) ** 2) / (2 * std ** 2)) for t in network_processor.T_Aft])
                     weights /= weights.sum()
 
-                    for idx, i in enumerate(network_processor.V3):
+                    for idx, i in enumerate(network_processor.V3): # Gives the index of PoDs
                         for w_idx, t in enumerate(network_processor.T_Aft):
-                            if (i, t) not in self.d_its:
-                                self.d_its[(i, t)] = total_demand[idx] * weights[w_idx]
+                            self.d_its[(i, t, s)] = total_demand[idx] * weights[w_idx]
 
-                    # Ensure zero demand for non-PoD locations
-                    for i in range(network_processor.V):
-                        if i not in network_processor.V3:
-                            for t in network_processor.T_Aft:
-                                if (i, t) not in self.d_its:
-                                    self.d_its[(i, t)] = 0.0
+                # Ensure zero demand for non-PoD locations
+                for i in range(network_processor.V):
+                    if i not in network_processor.V3:
+                        for t in network_processor.T_Aft:
+                            self.d_its[(i, t, s)] = 0.0
     
     def save_landfall_states(self, in_sample_data, network_processor, output_file="Generated data/LandfallStates.xlsx", debug_mode=False):
         """
@@ -547,25 +549,8 @@ class DemandData:
                     demand_value = df.iloc[i, t]
                     self.d_its[(loc_id, time_step, scenario_idx)] = demand_value
 
-        #for (i, t, s), value in self.d_its.items():
-         #   if value != 0:
-          #      print(f"(i={i}, t={t}, s={s}) → demand = {value}")
-
         self.sce = list(range(self.num_sce))
         self.P = [1 / self.num_sce] * self.num_sce
-
-    def compute_expected_demand(self):
-
-        expected_demand = {}  # Dictionary to store averaged demand
-
-        # Iterate over all locations and time periods
-        for (i, t, s) in self.d_its:
-            if (i, t) not in expected_demand:
-                expected_demand[(i, t)] = 0  # Initialize sum
-        
-            expected_demand[(i, t)] += self.d_its[(i, t, s)] / self.num_sce
-
-        self.d_its_expected = {(i, t, 0): expected_demand[(i, t)] for (i, t) in expected_demand}
 
     def msp_demand_mapping(self, t, k_t, network_processor):
         """Return a dict {i: demand_i(t)} based on realized state k_t."""
