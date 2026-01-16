@@ -44,7 +44,7 @@ class MultiStageSPModel:
         self.T1 = network_processor.T1
         self.t_ijt = network_processor.t_ijt
         self.t_L = network_processor.t_L 
-        self.tt_max = network_processor.tt_max
+        self.tt_max_d = network_processor.tt_max + 1 # Adding +1 delay
 
         # Define delta indicator
         if self.travel_time == 2:
@@ -91,7 +91,7 @@ class MultiStageSPModel:
                 for j in range(self.V):
                     if (i, j) in self.A:
                         for r in range(self.R):
-                            for t_prime in range(t - self.tt_max, t+1):
+                            for t_prime in range(t - self.tt_max_d, t+1):
                                 f1[i, j, r, t_prime] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f1_{i}_{j}_{r}_{t_prime}")
 
         # Define local variables
@@ -203,7 +203,7 @@ class MultiStageSPModel:
             for (i, j) in self.A:
                 for r in range(self.R):
                     # t′ < t: Carry forward past flows (to be updated later)
-                    for t_prime in range(t - self.tt_max, t):
+                    for t_prime in range(t - self.tt_max_d, t):
                         in_transit_update_constr1[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] <= 0, name=f"CarryTransit1_{i}_{j}_{r}_{t_prime}_to_{t}") 
                 
 
@@ -211,7 +211,7 @@ class MultiStageSPModel:
             for (i, j) in self.A:
                 for r in range(self.R):
                     # t′ < t: Carry forward past flows (to be updated later)
-                    for t_prime in range(t - self.tt_max, t):
+                    for t_prime in range(t - self.tt_max_d, t):
                         in_transit_update_constr2[i, j, r, t_prime] = m.addConstr(f1[i, j, r, t_prime] >= 0, name=f"CarryTransit2_{i}_{j}_{r}_{t_prime}_to_{t}")
                     
 
@@ -594,7 +594,7 @@ class MultiStageSPModel:
             for t in range(self.T1):
                 for (i, j) in self.A:
                     for r in range(self.R):
-                        for t_prime in range(t - self.tt_max, t+1): 
+                        for t_prime in range(t - self.tt_max_d, t+1): 
                             f1_prev[i, j, r, t_prime, t] = 0.0 
 
         thetaval = [0] * self.T1     # Stores theta values (cost-to-go)
@@ -609,6 +609,8 @@ class MultiStageSPModel:
                 elif self.travel_time == 2:
                     self.update_rhs(t, k_t, I_prev, U_prev, f1_prev) # Update the right hand side of the constraints
             self.m[t, k_t].optimize() # Optimize the model
+
+            # print(f"t = {t}, state = {k_t}, objective value = {self.m[t, k_t].ObjVal}")
 
             # Check for the optimality and then extract the solution for updating state variables
             if self.m[t, k_t].status != GRB.OPTIMAL:
@@ -640,13 +642,15 @@ class MultiStageSPModel:
                         if self.travel_time == 2: 
                             for (i, j) in self.A:
                                 for r in range(self.R):
-                                    for t_prime in range(t-self.tt_max, t+1): 
+                                    for t_prime in range(t-self.tt_max_d, t+1): 
                                         f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime].x
 
                         thetaval[t] = self.theta[t, k_t].x
 
                 if t == 0:
                     lb = self.m[t, k_t].objVal            
+        
+        # print("state path:", state_path)
         
         if self.travel_time == 1:
             return I_prev, U_prev, thetaval, lb, state_path
@@ -681,7 +685,7 @@ class MultiStageSPModel:
         if t < self.t_L:
             for (i, j) in self.A:
                 for r in range(self.R):
-                    for t_prime in range(t - self.tt_max, t):  # Only for past departure times
+                    for t_prime in range(t - self.tt_max_d, t):  # Only for past departure times
                         if (i, j, t_prime, t) not in self.delta: # Check whether flow (i, j) started at t′ is still in transit at stage t
                             rhs_val = f1_prev[i, j, r, t_prime, t - 1] # If it hasn't arrived yet, carry forward from previous stage
                         else:
@@ -752,7 +756,7 @@ class MultiStageSPModel:
                     if t < self.t_L:
                         for (i, j) in self.A: #***
                             for r in range(self.R):
-                                for t_prime in range(t-self.tt_max, t):
+                                for t_prime in range(t-self.tt_max_d, t):
                                     dual_transit1[k_state, i, j, r, t_prime] = self.in_transit_update_constr1[t, k_state][i, j, r, t_prime].pi
                                     dual_transit2[k_state, i, j, r, t_prime] = self.in_transit_update_constr2[t, k_state][i, j, r, t_prime].pi
 
@@ -778,8 +782,8 @@ class MultiStageSPModel:
                 cutcoef_I1 = [[0] * self.R for _ in range(self.V)]  
                 cutcoef_I2 = [[0] * self.R for _ in range(self.V)]
                 if t < self.t_L:
-                    cutcoef_f1 = {(i, j, r, t_prime): 0.0 for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max, t)} #***     
-                    cutcoef_f2 = {(i, j, r, t_prime): 0.0 for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max, t)} 
+                    cutcoef_f1 = {(i, j, r, t_prime): 0.0 for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max_d, t)} #***     
+                    cutcoef_f2 = {(i, j, r, t_prime): 0.0 for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max_d, t)} 
                 else: # ***
                     cutcoef_I3 = [[[0] * (self.T - (self.t_L + 1)) for r in range(self.R)] for i in range(self.V)]
                     cutcoef_I4 = [[[0] * (self.T - (self.t_L + 1)) for r in range(self.R)] for i in range(self.V)]
@@ -826,7 +830,7 @@ class MultiStageSPModel:
                         if t < self.t_L:
                             for (i, j) in self.A:
                                 for r in range(self.R):
-                                    for t_prime in range(t - self.tt_max, t):
+                                    for t_prime in range(t - self.tt_max_d, t):
                                         if (i, j, t_prime, t) not in self.delta:
                                             lam1 = dual_transit1[k_state, i, j, r, t_prime] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                             cutcoef_f1[(i, j, r, t_prime)] += lam1 
@@ -857,8 +861,8 @@ class MultiStageSPModel:
                                         - gp.quicksum(cutcoef_I2[i][r] * self.I[t-1, n][i, r] for i in range(self.V) for r in range(self.R))
                                         - gp.quicksum(cutcoef_I1[i][r] * gp.quicksum(self.f1[t-1, n][j, i, r, t_prime] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta) for i in range(self.V) for r in range(self.R))
                                         - gp.quicksum(cutcoef_I2[i][r] * gp.quicksum(self.f1[t-1, n][j, i, r, t_prime] for j in range(self.V) for t_prime in range(t) if (j, i) in self.A and (j, i, t_prime, t) in self.delta) for i in range(self.V) for r in range(self.R))
-                                        - gp.quicksum(cutcoef_f1[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max, t)) 
-                                        - gp.quicksum(cutcoef_f2[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max, t))
+                                        - gp.quicksum(cutcoef_f1[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max_d, t)) 
+                                        - gp.quicksum(cutcoef_f2[(i, j, r, t_prime)] * self.f1[t-1, n][i, j, r, t_prime] for (i, j) in self.A for r in range(self.R) for t_prime in range(t - self.tt_max_d, t))
                                         >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
 
         return cutviolFlag
@@ -985,6 +989,7 @@ class MultiStageSPModel:
         relative_gap = self.rel_gap
         lb = 0
         LB = []  # lower-bound history 
+        elapsed_times = [] 
         thetaval = [0] * self.T1
         iter = 0
         cutviol_iter = 0
@@ -1004,6 +1009,7 @@ class MultiStageSPModel:
                 I_prev, U_prev, f1_prev, thetaval, lb, state_path = self.forward_pass()
             
             LB.append(lb)
+            elapsed_times.append(time.time() - start)  # seconds since start
 
             # Termination check
             flag, Elapsed, relative_gap = msp_helper.termination_check(iter, relative_gap, LB, start, cutviol_iter, self.params)
@@ -1012,7 +1018,7 @@ class MultiStageSPModel:
                 break
 
             # Record relative gap at each full hour
-            elapsed_hr = (time.time() - start) / 3600  # in hours
+            elapsed_hr = (time.time() - start) / 1200  # in hours
             if elapsed_hr >= next_hour_mark:
                 current_gap = relative_gap
                 hourly_gaps.append((next_hour_mark, current_gap))
@@ -1037,9 +1043,9 @@ class MultiStageSPModel:
             output_path = "SDDP_LB_history.csv"
             with open(output_path, mode='w', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow(["Iteration", "LB"])
-                for i, lb_val in enumerate(LB, start=1):
-                    writer.writerow([i, lb_val])
+                writer.writerow(["Iteration", "LB", "ElapsedTimeSec"])
+                for it, (lb_val, t_sec) in enumerate(zip(LB, elapsed_times), start=1):
+                    writer.writerow([it, lb_val, t_sec])
 
             # Save hourly relative gap to CSV
             with open("SDDP_Hourly_Gap.csv", mode='w', newline='') as file:
@@ -1351,7 +1357,7 @@ class MultiStageSPModel:
                                 for j in range(self.V):
                                     if (i, j) in self.A:
                                         for r in range(self.R):
-                                            for t_prime in range(t -self.tt_max, t+1):
+                                            for t_prime in range(t -self.tt_max_d, t+1):
                                                 # if t == self.t_L: ***
                                                 #     f1_prev[i, j, r, t_prime, t] = self.f1[t, k_t][i, j, r, t_prime, t].x
                                                 # else:

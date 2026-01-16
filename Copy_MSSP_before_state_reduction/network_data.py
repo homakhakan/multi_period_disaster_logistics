@@ -166,7 +166,7 @@ class NetworkData:
             # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
             # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
             self.t_ijt = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
-            self.tt_max = np.max(self.t_ijt) + 1 # Extract the maximum travel time + delay to later use in sddp for saving some computational time
+            self.tt_max = np.max(self.t_ijt)# Extract the maximum travel time (without considering +1 delay) to later use in sddp for saving some computational time
 
         #Starting number of trucks at location i (time period 0)
         self.C_i0 = self.df_V["TruckStart"].tolist()

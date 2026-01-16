@@ -154,8 +154,8 @@ class NetworkData:
         
         if travel_time == 1:
             # Travel time in time periods (travel times are only 1 time period)
-            self.t_ijt = np.ones((self.V, self.V), dtype=int)  # fill with 1s
-            np.fill_diagonal(self.t_ijt, 0)  # set diagonal to 0
+            self.t_ij = np.ones((self.V, self.V), dtype=int)  # fill with 1s
+            np.fill_diagonal(self.t_ij, 0)  # set diagonal to 0
             # Loop through durationMatrix to find off-diagonal zeros
             for i in range(self.V):
                 for j in range(self.V):
@@ -163,10 +163,10 @@ class NetworkData:
                         self.t_ijt[i][j] = 0
 
         elif travel_time == 2:
-            # Load fixed t_ijt travel time matrix from file (travel times are more than 1 time period)
+            # Load fixed t_ij travel time matrix from file (travel times are more than 1 time period)
             # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
-            self.t_ijt = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
-            self.tt_max = np.max(self.t_ijt) + 1 # Extract the maximum travel time + delay to later use in sddp for saving some computational time
+            self.t_ij = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
+            self.tt_max = np.max(self.t_ij) # Extract the maximum travel time (without delay) to later use in sddp for saving some computational time
 
         #Starting number of trucks at location i (time period 0)
         self.C_i0 = self.df_V["TruckStart"].tolist()

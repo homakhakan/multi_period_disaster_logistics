@@ -6,7 +6,7 @@ from shapely.geometry import Point, LineString
 import math
 import helper
 
-np.random.seed(42)
+# np.random.seed(42)
 
 args = commands.get_commands()[2]
 data = Data(args=args)
