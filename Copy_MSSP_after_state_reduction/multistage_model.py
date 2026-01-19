@@ -1519,7 +1519,8 @@ class MultiStageSPModel:
             plt.title('Average Satisfied Demand Over Time')
             plt.grid(True)
             plt.tight_layout()
-            plt.savefig("avg_satisfied_demand_over_time_M1=1_M2=1.png", dpi=300) # Save the plot as an image
+            save_path = os.path.join("Heat map", f"avg_satisfied_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            plt.savefig(save_path, dpi=300)
             plt.close()
 
             # Plotting inventory in demand locations over time
@@ -1531,8 +1532,8 @@ class MultiStageSPModel:
             plt.ylabel('Average Inventory Level')
             plt.title('Average Inventory at Shelters Over Time')
             plt.grid(True)
-            plt.tight_layout()
-            plt.savefig("avg_inventory_shelter_over_time_M1=1_M2=1.png", dpi=300)
+            save_path = os.path.join("Heat map", f"avg_inevntory_shelter_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            plt.savefig(save_path, dpi=300)
             plt.close()
             
             avg_inv_pod = np.mean(inv_pod, axis=0)
@@ -1544,7 +1545,8 @@ class MultiStageSPModel:
             plt.title('Average Inventory at PoDs Over Time')
             plt.grid(True)
             plt.tight_layout()
-            plt.savefig("avg_inventory_pod_over_time_M1=1_M2=1.png", dpi=300)
+            save_path = os.path.join("Heat map", f"avg_inevntory_pod_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            plt.savefig(save_path, dpi=300)
             plt.close()
             
             # Printing costs
@@ -1592,9 +1594,8 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", "inventory_M1=1_M2=1.png")
+            save_path = os.path.join("Heat map", f"inventory_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
             plt.savefig(save_path, dpi=300)
-            print(f"Heatmap saved to: {save_path}")
             
             # Plotting unmet demand heat map
             plt.figure(figsize=(6, 6))
@@ -1614,9 +1615,8 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", "unmet_demand_M1=1_M2=1.png")
+            save_path = os.path.join("Heat map", f"unmet_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
             plt.savefig(save_path, dpi=300)
-            print(f"Heatmap saved to: {save_path}")
 
             # Plotting satisfied demand heat map
             plt.figure(figsize=(6, 6))
@@ -1636,9 +1636,8 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", "satisfied_demand_M1=1_M2=1.png")
+            save_path = os.path.join("Heat map", f"satisfied_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
             plt.savefig(save_path, dpi=300)
-            print(f"Heatmap saved to: {save_path}")
             # =====================================================================
 
             return [mean_obj, CI, test_time]

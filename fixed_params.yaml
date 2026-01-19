@@ -17,9 +17,9 @@ std_pod: 1
 
 
 # For sensitivity analysis
-MULTIPLIER1: 1 # Penalty cost multiplier
-MULTIPLIER2: 1 # Travel cost multiplier
-MULTIPLIER3: 1 # Arc capacity multiplier
+MULTIPLIER_PENALTY_COST: 1 # Penalty cost multiplier
+MULTIPLIER_TRANS_COST: 1 # Travel cost multiplier
+MULTIPLIER_ARC: 1 # Arc capacity multiplier
 
 # Benders config
 THETA_LB: 0
@@ -28,7 +28,7 @@ EPS: 1e-5
 # Multi-Stage
 smallest_trans_prob: 0.0005
 CUTVIOL: 0.0001
-MAX_ITER: 100000
+MAX_ITER: 2
 STALL: 200
 CUTVIOL_MAXITER: 100000
 TIME_LIMIT: 86400

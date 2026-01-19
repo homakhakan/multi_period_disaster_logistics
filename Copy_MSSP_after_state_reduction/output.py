@@ -3,7 +3,7 @@ import gurobipy as gp
 import os
 from openpyxl import load_workbook
 
-def ext_results(model_instance, model, instance_version, num_sce, total_time, multiplier1, multiplier2, multiplier3, model_version, output_filename="ext_results.xlsx"):
+def ext_results(model_instance, model, instance_version, num_sce, total_time, multiplier_penalty_cost, multiplier_trans_cost, multiplier_arc, model_version, output_filename="ext_results.xlsx"):
 
     if model.status == gp.GRB.OPTIMAL:
         obj_value = model.objVal  # Extract objective value
@@ -85,9 +85,9 @@ def ext_results(model_instance, model, instance_version, num_sce, total_time, mu
             "Penalty Cost (After Landfall)": [penalty_cost_after],
             "Transportation Cost (Before Landfall)": [transport_cost_before],
             "Transportation Cost (After Landfall)": [transport_cost_after],
-            "Penalty Multiplier": [multiplier1],
-            "Travel Cost Multiplier": [multiplier2],
-            "Arc Capacity Multiplier": [multiplier3]
+            "Penalty Multiplier": [multiplier_penalty_cost],
+            "Travel Cost Multiplier": [multiplier_trans_cost],
+            "Arc Capacity Multiplier": [multiplier_arc]
         })
 
         # Check if file exists
@@ -188,16 +188,16 @@ def benders_results(instance_version, num_sce, total_time_benders, LB, UB, model
 
     print(f"\nBenders results stored in {output_filename}")
 
-def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, multiplier1, multiplier2, multiplier3, output_filename="mvp_results.xlsx"):
+def mvp_results(instance_version, num_sce, total_time_mvp, mvp_obj_value, multiplier_penalty_cost, multiplier_trans_cost, multiplier_arc, output_filename="mvp_results.xlsx"):
     # Create a DataFrame with MVP results
     df = pd.DataFrame({
         "Instance Version": [instance_version],
         "Number of Scenarios": [num_sce],
         "Objective Value": [mvp_obj_value],
         "Time (seconds)": [total_time_mvp],
-        "Penalty Multiplier": [multiplier1],
-        "Travel Cost Multiplier": [multiplier2],
-        "Arc Capacity Multiplier": [multiplier3]
+        "Penalty Multiplier": [multiplier_penalty_cost],
+        "Travel Cost Multiplier": [multiplier_trans_cost],
+        "Arc Capacity Multiplier": [multiplier_arc]
     })
 
     # Check if the file already exists

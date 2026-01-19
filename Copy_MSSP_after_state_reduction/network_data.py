@@ -150,8 +150,8 @@ class NetworkData:
         print(self.I_ir0)
 
         # Penalty costs per location
-        self.multiplier1 = float(self.params["MULTIPLIER1"])
-        self.p_i = (self.df_V["P_i"] * self.multiplier1).tolist()
+        self.multiplier_penalty_cost = float(self.params["MULTIPLIER_PENALTY_COST"])
+        self.p_i = (self.df_V["P_i"] * self.multiplier_penalty_cost).tolist()
         
         if travel_time == 1:
             # Travel time in time periods (travel times are only 1 time period)
@@ -176,8 +176,8 @@ class NetworkData:
         self.h_i = self.df_V['TruckDelay'].tolist()
 
         # Travel cost between locations
-        self.multiplier2 = float(self.params["MULTIPLIER2"])  # Scaling factor
-        self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) * self.multiplier2 for j in range(len(self.df_V))] for i in range(len(self.df_V))]
+        self.multiplier_trans_cost = float(self.params["MULTIPLIER_TRANS_COST"])  # Scaling factor
+        self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) * self.multiplier_trans_cost for j in range(len(self.df_V))] for i in range(len(self.df_V))]
     
         # # Convert m_ij into a DataFrame with row and column labels
         # df_mij = pd.DataFrame(self.m_ij, columns=self.df_V.index, index=self.df_V.index)
@@ -206,9 +206,9 @@ class NetworkData:
         # exit(0)
 
         # Initialize K_ijt
-        self.multiplier3 = float(self.params["MULTIPLIER3"])  # Scaling factor
+        self.multiplier_arc = float(self.params["MULTIPLIER_ARC"])  # Scaling factor
         self.K_ijt = {}
         for index, row in self.df_K.iterrows():
             i, j, t = row['From_Node'], row['To_Node'], row['Time_Period']
-            capacity = row['Capacity'] * self.multiplier3
+            capacity = row['Capacity'] * self.multiplier_arc
             self.K_ijt.setdefault(i, {}).setdefault(j, {})[t] = capacity
