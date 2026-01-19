@@ -1171,18 +1171,6 @@ class MultiStageSPModel:
                     writer.writerow([i, lb_val])
 
         return LB, train_time, iter
-    
-    # TEMPORARY SANITY CHECK (remove after validation)
-    def check_bucket_monotonicity(self, U_vec, eps=1e-6):
-        """
-        U_vec: 1D array-like, U[k] for k=0..t (bucket 1..t+1)
-        Condition: U[k] > 0 => U[k-1] > 0 (no "holes")
-        Returns (ok, first_violation_index)
-        """
-        for k in range(1, len(U_vec)):
-            if U_vec[k] > eps and U_vec[k-1] <= eps:
-                return False, k
-        return True, None
 
     # Evaluate model
     def sddp_eval(self, sample_paths_file, demand_processor):
@@ -1484,16 +1472,6 @@ class MultiStageSPModel:
                                     satisfied_by_bucket[s, kk] += self.S[t, k_t][i, kk].x
                                     satisfied_over_time[s, t] += self.S[t, k_t][i, kk].x # Recording satisfied demand per sample path and also per time step ***kk
                                     Uval[s, t][i] = self.U[t, k_t][i, kk].x # ***kk
-
-                                # ---- Sanity check: bucket monotonicity (temporary) ----
-                                if t < self.t_L and i in self.V1 and t > 0:
-                                    ok, k_bad = self.check_bucket_monotonicity(U_prev[i, t, :t+1])
-                                    if not ok:
-                                        print("\n[Bucket monotonicity violation❌]")
-                                        print(f"sample path s={s}, time t={t}, node i={i}, k_bad={k_bad}")
-                                        print("U buckets =", U_prev[i, t, :t+1])
-                                        print("state k_t =", k_t)
-                                # ------------------------------------------------------
 
                             if t > 0 and i in self.V1: # Only include inventory at demand locations before landfall (shelters) for t > 0
                                 for kk in range(t + 1):

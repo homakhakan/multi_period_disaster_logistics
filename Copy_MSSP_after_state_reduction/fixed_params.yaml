@@ -8,8 +8,8 @@ FUEL_COST_PER_MILE: 0.1
 
 
 INVENTORY_COLUMNS:
-  large: ["Water StartInv"]
-  small: ["Water StartInv"]
+  large: ["Water StartInv", "Food StartInv"]
+  small: ["Water StartInv", "Food StartInv"]
 
 
 # Normal distribution params related to distributing total PoD demand 
@@ -28,7 +28,7 @@ EPS: 1e-5
 # Multi-Stage
 smallest_trans_prob: 0.0005
 CUTVIOL: 0.0001
-MAX_ITER: 5
+MAX_ITER: 100000
 STALL: 200
 CUTVIOL_MAXITER: 100000
 TIME_LIMIT: 86400

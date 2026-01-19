@@ -135,7 +135,7 @@ class NetworkData:
 
         # Initialize inventory list
         selected_columns = self.params["INVENTORY_COLUMNS"][self.instance_version]
-        # print(selected_columns)
+        print(selected_columns)
 
         
         Inv = []
@@ -143,10 +143,11 @@ class NetworkData:
             Inv.extend([self.df_V[col][i] for col in selected_columns])
 
         self.R = len(selected_columns)  # Number of resources
-        # print("R=", self.R)
+        print("R=", self.R)
 
         
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
+        print(self.I_ir0)
 
         # Penalty costs per location
         self.multiplier1 = float(self.params["MULTIPLIER1"])
@@ -189,20 +190,20 @@ class NetworkData:
             if i in idx:
                 water_pc = float(self.df_V.at[i, 'Water PC'])
                 food_pc = float(self.df_V.at[i, 'Food PC'])
-                # self.cost_ir.append([water_pc, food_pc, 0, 0])
-                self.cost_ir.append([water_pc])
-        # print(self.cost_ir)
-        # exit(0)
+                self.cost_ir.append([water_pc, food_pc])
+                # self.cost_ir.append([food_pc])
+        print(self.cost_ir)
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
-        # print("w_r:", self.w_r)
+        print("w_r:", self.w_r)
   
         # Factor of pallet required per commodity r
         self.g_shelter = self.df_R['pallet per S-Kit'].tolist()
         self.g_pod = self.df_R['pallet per P-Kit'].tolist()
-        # print("g_shelter:", self.g_shelter)
-        # print("g_pod:", self.g_pod)
+        print("g_shelter:", self.g_shelter)
+        print("g_pod:", self.g_pod)
+        # exit(0)
 
         # Initialize K_ijt
         self.multiplier3 = float(self.params["MULTIPLIER3"])  # Scaling factor
