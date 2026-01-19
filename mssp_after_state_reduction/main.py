@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
     parser.add_argument("-iv", "--instance_version", type=str, choices=["large", "small"])
+    parser.add_argument("-c", "--commodity", type=str, choices=["water", "food", "both"], required=True, help="Commodity type: water, food, or both")
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon/sddp evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
@@ -61,6 +62,7 @@ if __name__ == "__main__":
     thetaLB = float(params["THETA_LB"])
     eps = float(params["EPS"])
     network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
+    network_processor.commodity = args.commodity
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters(args.travel_time)
 
@@ -123,7 +125,7 @@ if __name__ == "__main__":
         # Print and save results
         if ext_model.Status == gp.GRB.OPTIMAL:
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
-            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier1, network_processor.multiplier_trans_cost, network_processor.multiplier_arc, model_version=args.model, output_filename="Results/ext_results.xlsx")
+            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier_penalty_cost, network_processor.multiplier_trans_cost, network_processor.multiplier_arc, model_version=args.model, output_filename="Results/ext_results.xlsx")
             
             fixed_I_irt = ext_model_instance.extract_all_inventory(I_vars)
         else:

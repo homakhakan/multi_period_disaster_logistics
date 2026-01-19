@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
     parser.add_argument("-iv", "--instance_version", type=str, choices=["large", "small"])
+    parser.add_argument("-c", "--commodity", type=str, choices=["water", "food", "both"], required=True, help="Commodity type: water, food, or both")
     parser.add_argument("-tl", "--time_limit", type=int, help="Time limit in seconds for running Benders")
     parser.add_argument("-no", "--nbOS", type=int, default=5, help="Number of sample paths for rolling horizon/sddp evaluation")
     parser.add_argument("-oos", "--num_oos", type=int, help="Number of out-of-sample scenarios for 2SSP evaluation")
@@ -61,6 +62,7 @@ if __name__ == "__main__":
     thetaLB = float(params["THETA_LB"])
     eps = float(params["EPS"])
     network_processor = NetworkData(args.instance_version, params) # Create an instance of the NetworkData class
+    network_processor.commodity = args.commodity
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters(args.travel_time)
 

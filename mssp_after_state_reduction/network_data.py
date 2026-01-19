@@ -53,7 +53,7 @@ class NetworkData:
     
         self.file_paths = {
             "location_file": f"Data/Set V_locations_{self.instance_version}.xlsx",
-            "resource_file": f"Data/Set R_resources_one_type.xlsx",
+            "resource_file": f"Data/Set R_resources.xlsx",
             "duration_matrix_file": f"Data/Duration_all_nodes_{self.instance_version}.txt",
             "distance_matrix_file": f"Data/Distance_all_nodes_{self.instance_version}.txt",
             "arc_capacity_file": f"Data/Arc_capacity_{self.instance_version}.xlsx",
@@ -134,7 +134,8 @@ class NetworkData:
         self.fuel = self.fuel_cost_per_mile * self.params["MILES_TO_METERS"] # Fuel cost per meter (converted from miles)    
 
         # Initialize inventory list
-        selected_columns = self.params["INVENTORY_COLUMNS"][self.instance_version]
+        # Filter inventory columns based on selected commodity (water, food, or both)
+        selected_columns = [c for c in self.params["INVENTORY_COLUMNS"][self.instance_version] if self.commodity == "both" or self.commodity.lower() in c.lower()]
         print(selected_columns)
 
         
@@ -190,20 +191,23 @@ class NetworkData:
             if i in idx:
                 water_pc = float(self.df_V.at[i, 'Water PC'])
                 food_pc = float(self.df_V.at[i, 'Food PC'])
-                self.cost_ir.append([water_pc, food_pc])
-                # self.cost_ir.append([food_pc])
+                self.cost_ir.append([water_pc, food_pc] if self.commodity == "both" else [water_pc if self.commodity == "water" else food_pc])
         print(self.cost_ir)
 
         # Fraction of a truck 1 pallet of resource r requires
-        self.w_r = [1 / pallet for pallet in self.df_R['Pallet Units on Truck']]
+        self.w_r = [1 / pallet for pallet, r in zip(self.df_R['Pallet Units on Truck'], self.df_R['R']) 
+                    if self.commodity == "both" or self.commodity.lower() == r.lower()]
         print("w_r:", self.w_r)
+        
   
         # Factor of pallet required per commodity r
-        self.g_shelter = self.df_R['pallet per S-Kit'].tolist()
-        self.g_pod = self.df_R['pallet per P-Kit'].tolist()
+        self.g_shelter = [g for g, r in zip(self.df_R['pallet per S-Kit'], self.df_R['R']) 
+                          if self.commodity == "both" or self.commodity.lower() == r.lower()]
+        self.g_pod = [g for g, r in zip(self.df_R['pallet per P-Kit'], self.df_R['R']) 
+                      if self.commodity == "both" or self.commodity.lower() == r.lower()]
         print("g_shelter:", self.g_shelter)
         print("g_pod:", self.g_pod)
-        # exit(0)
+        exit(0)
 
         # Initialize K_ijt
         self.multiplier_arc = float(self.params["MULTIPLIER_ARC"])  # Scaling factor

@@ -8,8 +8,8 @@ FUEL_COST_PER_MILE: 0.1
 
 
 INVENTORY_COLUMNS:
-  large: ["Water StartInv"]
-  small: ["Water StartInv"]
+  large: ["Water StartInv", "Food StartInv"]
+  small: ["Water StartInv", "Food StartInv"]
 
 
 # Normal distribution params related to distributing total PoD demand 
