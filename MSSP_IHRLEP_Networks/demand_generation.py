@@ -26,6 +26,7 @@ def demand_deterministic_landfall(data, track_err, hurr_cat, t):
     DF = np.zeros([data.I])
     # First demand is realized 4 periods before landfall.
     if t >= data.T - data.tau:
+        exit(0)
         dY = [0] * data.I
         dX = [0] * data.I
         for i in range(data.I):

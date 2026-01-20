@@ -207,7 +207,6 @@ class NetworkData:
                       if self.commodity == "both" or self.commodity.lower() == r.lower()]
         print("g_shelter:", self.g_shelter)
         print("g_pod:", self.g_pod)
-        exit(0)
 
         # Initialize K_ijt
         self.multiplier_arc = float(self.params["MULTIPLIER_ARC"])  # Scaling factor

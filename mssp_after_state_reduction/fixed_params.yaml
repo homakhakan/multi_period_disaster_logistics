@@ -5,6 +5,7 @@ T2: 6 # Time periods after landfall
 TOTAL_HOURS: 192 # total hours during the planning horizon (8 days: 5 days before and 3 days after landfall)
 MILES_TO_METERS: 0.000621371
 FUEL_COST_PER_MILE: 0.1 
+tau: 6 # Lead time
 
 
 INVENTORY_COLUMNS:

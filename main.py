@@ -58,6 +58,8 @@ if __name__ == "__main__":
 
     with open("fixed_params.yaml", "r") as f:
         params = yaml.safe_load(f)
+    # params["T1"] = data.T # Inject T1 from external repo
+    data.tau = int(params["tau"]) # Force external runtime object to use your tau
 
     thetaLB = float(params["THETA_LB"])
     eps = float(params["EPS"])
