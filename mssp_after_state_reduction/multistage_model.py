@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 class MultiStageSPModel:
-    def __init__(self, network_processor, demand_processor, params, travel_time, last_stage):
+    def __init__(self, network_processor, demand_processor, params, travel_time, last_stage, mc_ins):
         self.network_processor = network_processor
         self.demand_processor = demand_processor
         self.params = params
@@ -46,6 +46,7 @@ class MultiStageSPModel:
         self.t_L = network_processor.t_L 
         self.tt_max = network_processor.tt_max
         self.alpha = 0.1 # Watch hardcoding
+        self.mc_ins = mc_ins
 
         # Define delta indicator
         if self.travel_time == 2:
@@ -60,7 +61,8 @@ class MultiStageSPModel:
             self.delta = set(self.delta)
 
         # Markov chain data
-        transition_path = "Data/pi_mssp_d_ST_track_15.json"
+        suffix = self.mc_ins.replace("mc_", "")  # "60_2_5"
+        transition_path = os.path.join("mc_output", self.mc_ins, f"Florence_combined_mc_p_matrix_{suffix}.json")
         self.transition_dict = msp_helper.load_transition_dict(transition_path)
         self.nodeLists = msp_helper.build_node_lists(self.transition_dict)
 
@@ -1293,6 +1295,7 @@ class MultiStageSPModel:
             unmet_amount = np.zeros(nbOS)
             satisfied_amount = np.zeros(nbOS)
             satisfied_over_time = np.zeros((nbOS, self.T)) # For plotting average satisfied demand over time 
+            total_demand_over_time = np.zeros((nbOS, self.T)) # Total arriving demand over time (shelters pre-landfall, PoDs post-landfall)
             proc_amount = np.zeros(nbOS)
             trans_amount = np.zeros(nbOS)
             inv_shelter = np.zeros((nbOS, self.T))
@@ -1319,7 +1322,6 @@ class MultiStageSPModel:
                 U_prev = np.zeros((self.V, self.T1))
                 if self.travel_time == 2:
                     f1_prev = np.zeros((self.V, self.R, self.T1, self.T1))
-                # U_bucket = np.zeros((self.V, self.T1)) # Deprivation # Unmet-demand aging buckets for deprivation-cost evaluation (not part of optimization)
                 U_bucket = np.zeros((self.V, self.T))  # allow ages up to full horizon (pre + post landfall)
                 for t in range(self.T1):
                     k_t = eval(OS_paths[s, t]) 
@@ -1347,6 +1349,10 @@ class MultiStageSPModel:
                         # ---------------------------------------------------------------------------------------------------
                         # For pre-landfall deprivation
                         demand_real = self.demand_processor.msp_demand_mapping(t, k_t, self.network_processor) 
+                        # Record total arriving demand at shelters for t <= t_L
+                        if t <= self.t_L:
+                            total_demand_over_time[s, t] = sum(demand_real[i] for i in self.V1)
+
                         S_real = np.zeros(self.V) # Collect total satisfied demand from no-dep policy
                         for i in range(self.V):
                             if t == self.t_L:
@@ -1389,6 +1395,10 @@ class MultiStageSPModel:
                         if t == self.t_L:
                             post_landfall_demand = self.demand_processor.msp_post_landfall_demand(k_t, self.network_processor)
 
+                            # Record total arriving demand at PoDs for all post-landfall periods
+                            for t_post in range(self.t_L + 1, self.T):
+                                total_demand_over_time[s, t_post] = sum(post_landfall_demand[(i, t_post)] for i in self.V3)
+
                             for t_post in range(self.t_L + 1, self.T):
 
                                 # age buckets
@@ -1410,7 +1420,7 @@ class MultiStageSPModel:
                                         served -= take
 
                                 # accumulate POST deprivation penalty
-                                for i in self.V1:
+                                for i in self.V3:
                                     for kk in range(t_post + 1):
                                         penalty_cost_post_with_dep[s] += ((1 + self.alpha * kk) * self.p_i[i] * U_bucket[i, kk])
 
@@ -1522,6 +1532,21 @@ class MultiStageSPModel:
             save_path = os.path.join("Heat map", f"avg_satisfied_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
+
+            # Plotting avg total demand over time (shelters pre-landfall, PoDs post-landfall)
+            avg_total_demand = np.mean(total_demand_over_time, axis=0)  # shape: (T,)
+            plt.figure(figsize=(8, 5))
+            plt.plot(range(self.T), avg_total_demand, marker='o', linestyle='-')
+            plt.xticks(range(self.T))
+            plt.xlabel('Time Period')
+            plt.ylabel('Average Overall Demand')
+            plt.title('Average Overall Demand Over Time')
+            plt.grid(True)
+            plt.tight_layout()
+            save_path = os.path.join("Heat map", f"avg_total_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            plt.savefig(save_path, dpi=300)
+            plt.close()
+
 
             # Plotting inventory in demand locations over time
             avg_inv_shelter = np.mean(inv_shelter, axis=0)

@@ -1,0 +1,50 @@
+[Start]
+   |
+   v
+[Task 1: Instance Data Prepration (run once per instance)]
+   |
+   v
+[Configure Instance Settings]
+   └── Edit inputs.json:
+         └── H (hours before landfall)
+         └── segments (subdivision of 12-hour periods)
+         └── lead_time
+         └── n_states_at_terminal
+   |
+   v
+[Generate Instance Data]
+   └── Run mc_generation.py once
+         └── Create extended point forecast (forecast_ext)
+         └── Construct study_line (coastal reference geometry)
+         └── Compute x_max (maximum cross-track deviation)
+         └── Estimate Markov chain transition matrices
+   |
+   v
+[Generate Real Out-of-Sample (OOS) Paths]
+   └── Activate real_OOS_paths block in main.py
+   └── Run main.py once with:
+         └── args[-no] = 1000 (or desired number of paths)
+   └── Save OOS paths automatically
+   |
+   v
+[Deactivate OOS Path Generation]
+   └── Disable real_OOS_paths block in main.py
+   |
+   v
+[Task 1 Complete]
+   └── All instance-level inputs are ready
+   |
+   v
+[Task 2: Run Optimization Models (repeat as needed)]
+   |
+   v
+[Select Model and Instance]
+   └── Use argparse options in main.py
+         └── Choose instance name
+         └── Choose solution method
+   |
+   v
+[Run Model via Command Line]
+   |
+   v
+[End]

@@ -1,19 +1,28 @@
 import pandas as pd
 import numpy as np
 import math
+import json
 
 class NetworkData:
     def __init__(self, instance_version, params):
+
+        # Read MC inputs
+        with open("mc_data/inputs.json", "r") as f:
+            raw = json.load(f)
+        mc_args = {k: (v["value"] if isinstance(v, dict) and "value" in v else v) for k, v in raw.items()}
+        H = int(mc_args["H"])
+        segments = int(mc_args["segments"])
    
         self.instance_version = instance_version
         self.params = params
-        self.tperiod = int(params["TPERIOD"])
+        self.tperiod = int(12 / segments)
         self.thetaLB = float(params["THETA_LB"])
         self.eps = float(params["EPS"])
-        self.T1 = int(params["T1"])
+        self.T1 = int(H / self.tperiod)
         self.T2 = int(params["T2"])
-        self.total_hours = int(params["TOTAL_HOURS"])
+        self.total_hours = (self.T1 + self.T2) * self.tperiod
         self.fuel_cost_per_mile = float(params["FUEL_COST_PER_MILE"])
+        self.base_cap = int(params["BASE_CAP"])
 
         # Load file paths
         self.get_file_paths()
@@ -21,7 +30,6 @@ class NetworkData:
         # Load data files
         self.df_V = pd.read_excel(self.file_paths["location_file"])
         self.df_R = pd.read_excel(self.file_paths["resource_file"])
-        self.df_K = pd.read_excel(self.file_paths["arc_capacity_file"])
 
         # Load matrices
         self.durationMatrix = np.loadtxt(self.file_paths["duration_matrix_file"])
@@ -56,7 +64,6 @@ class NetworkData:
             "resource_file": f"Data/Set R_resources.xlsx",
             "duration_matrix_file": f"Data/Duration_all_nodes_{self.instance_version}.txt",
             "distance_matrix_file": f"Data/Distance_all_nodes_{self.instance_version}.txt",
-            "arc_capacity_file": f"Data/Arc_capacity_{self.instance_version}.xlsx",
         }
 
     def define_sets(self):
@@ -136,7 +143,7 @@ class NetworkData:
         # Initialize inventory list
         # Filter inventory columns based on selected commodity (water, food, or both)
         selected_columns = [c for c in self.params["INVENTORY_COLUMNS"][self.instance_version] if self.commodity == "both" or self.commodity.lower() in c.lower()]
-        print(selected_columns)
+        # print(selected_columns)
 
         
         Inv = []
@@ -144,11 +151,11 @@ class NetworkData:
             Inv.extend([self.df_V[col][i] for col in selected_columns])
 
         self.R = len(selected_columns)  # Number of resources
-        print("R=", self.R)
+        # print("R=", self.R)
 
         
         self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
-        print(self.I_ir0)
+        # print(self.I_ir0)
 
         # Penalty costs per location
         self.multiplier_penalty_cost = float(self.params["MULTIPLIER_PENALTY_COST"])
@@ -183,6 +190,7 @@ class NetworkData:
         # # Convert m_ij into a DataFrame with row and column labels
         # df_mij = pd.DataFrame(self.m_ij, columns=self.df_V.index, index=self.df_V.index)
         # df_mij.to_csv("m_ij_matrix.csv", index=True)
+        # exit(0)
 
         # Procurement cost per resource
         self.cost_ir = []
@@ -192,12 +200,12 @@ class NetworkData:
                 water_pc = float(self.df_V.at[i, 'Water PC'])
                 food_pc = float(self.df_V.at[i, 'Food PC'])
                 self.cost_ir.append([water_pc, food_pc] if self.commodity == "both" else [water_pc if self.commodity == "water" else food_pc])
-        print(self.cost_ir)
+        # print(self.cost_ir)
 
         # Fraction of a truck 1 pallet of resource r requires
         self.w_r = [1 / pallet for pallet, r in zip(self.df_R['Pallet Units on Truck'], self.df_R['R']) 
                     if self.commodity == "both" or self.commodity.lower() == r.lower()]
-        print("w_r:", self.w_r)
+        # print("w_r:", self.w_r)
         
   
         # Factor of pallet required per commodity r
@@ -205,13 +213,15 @@ class NetworkData:
                           if self.commodity == "both" or self.commodity.lower() == r.lower()]
         self.g_pod = [g for g, r in zip(self.df_R['pallet per P-Kit'], self.df_R['R']) 
                       if self.commodity == "both" or self.commodity.lower() == r.lower()]
-        print("g_shelter:", self.g_shelter)
-        print("g_pod:", self.g_pod)
+        # print("g_shelter:", self.g_shelter)
+        # print("g_pod:", self.g_pod)
 
         # Initialize K_ijt
         self.multiplier_arc = float(self.params["MULTIPLIER_ARC"])  # Scaling factor
         self.K_ijt = {}
-        for index, row in self.df_K.iterrows():
-            i, j, t = row['From_Node'], row['To_Node'], row['Time_Period']
-            capacity = row['Capacity'] * self.multiplier_arc
-            self.K_ijt.setdefault(i, {}).setdefault(j, {})[t] = capacity
+        for (i, j) in self.A:
+            self.K_ijt.setdefault(i, {})[j] = {}
+            for t in range(self.T):
+                self.K_ijt[i][j][t] = self.base_cap * self.multiplier_arc
+
+

@@ -2,11 +2,33 @@ import json
 import numpy as np
 import pandas as pd
 import time
-np.random.seed()
 
-def load_transition_dict(path):
+# np.random.seed(42)
+
+# def load_transition_dict(path):
+#     with open(path, "r") as f:
+#         return json.load(f)
+
+def load_transition_dict(path, tol=1e-10):
     with open(path, "r") as f:
-        return json.load(f)
+        td = json.load(f)
+
+    # td structure: td[t][state][next_state] = prob
+    for t, from_states in td.items():
+        for s, next_dict in from_states.items():
+            # sum over outgoing probs
+            total = sum(next_dict.values())
+
+            # If total is 0, that's a real data problem (no outgoing mass)
+            if total <= 0:
+                raise ValueError(f"Zero outgoing probability mass at t={t}, state={s}")
+
+            # Only normalize if not already (within tolerance)
+            if abs(total - 1.0) > tol:
+                for ns in next_dict:
+                    next_dict[ns] = next_dict[ns] / total
+
+    return td
 
 def build_node_lists(transition_dict):
     nodeLists = {}
@@ -26,6 +48,7 @@ def MC_sample(t, current_state, transition_dict):
     states_str = [s for s, p in probs_dict.items() if p > 0]
     weights    = [p for s, p in probs_dict.items() if p > 0]
     states = [eval(s) for s in states_str] # Convert state strings to tuples
+    # print("weight:", sum(weights))
     idx    = np.random.choice(len(states), p=weights) # Randomly sample next state
     return states[idx]
 

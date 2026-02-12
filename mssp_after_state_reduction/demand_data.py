@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import copy
 import os
+from demand_gen_indep import new_in_sample, demand_generation, inputs, state_space
 
 class DemandData:
     def __init__(self, num_sce, instance_version, nbOS, params):
@@ -42,6 +43,7 @@ class DemandData:
         """
         # Load PoD population
         pod_info_df = pd.read_excel(population_file, sheet_name="Sheet1")
+        self.dp_loc_array = pod_info_df[["longitude", "latitude"]].to_numpy()
         self.pod_info_df = pod_info_df
         self.population = pod_info_df["Pop. of County"].to_numpy()
 
@@ -56,16 +58,15 @@ class DemandData:
         inverse_distances = 1 / distance_matrix.replace(0, float("inf"))
         self.weights = inverse_distances.div(inverse_distances.sum(axis=1), axis=0)
 
-    def generate_current_demand(self, t_bar, s_t, network_processor, data, solution_method):
+    def generate_current_demand(self, t_bar, s_t, network_processor, solution_method):
         """
         Generate deterministic shelter-level demand at time t_bar based on the realized hurricane state s_t.
         Updates self.d_its with demand values for shelters and zero demand for non-shelter locations.
         """
-        from demand_generation import demand_deterministic_landfall, data
         track_err, intensity = s_t
 
         # Step 1: Get PoD-level demand based on hurricane state
-        demand_vector = demand_deterministic_landfall(data, track_err, int(intensity), t_bar)
+        demand_vector = demand_generation(self.dp_loc_array, track_err, int(intensity), t_bar, inputs)
         scaled_pod_demand = self.population * np.array(demand_vector)
 
         # Step 2: Distribute demand to shelters using inverse-distance weights
@@ -96,14 +97,13 @@ class DemandData:
         
         Updates self.d_its with demand values for all in-sample scenarios.
         """
-        from demand_generation import demand_deterministic_landfall, data
 
         if solution_method in [1, 8]:
             # Static 2SSP: use only the realized path (s=0)
             for t in range(t_bar + 1, t_L + 1):
                 track_err_s, intensity_s = in_sample_paths[0, t]
 
-                demand_vector = demand_deterministic_landfall(data, track_err_s, int(intensity_s), t)
+                demand_vector = demand_generation(self.dp_loc_array, track_err_s, int(intensity_s), t, inputs)
                 scaled_pod_demand = self.population * np.array(demand_vector)
 
                 demand_df = pd.DataFrame({t: scaled_pod_demand})
@@ -122,7 +122,7 @@ class DemandData:
                 for t in range(t_bar + 1, t_L + 1):
                     track_err_s, intensity_s = in_sample_paths[s, t]
 
-                    demand_vector = demand_deterministic_landfall(data, track_err_s, int(intensity_s), t)
+                    demand_vector = demand_generation(self.dp_loc_array, track_err_s, int(intensity_s), t, inputs)
                     scaled_pod_demand = self.population * np.array(demand_vector)
 
                     demand_df = pd.DataFrame({t: scaled_pod_demand})
@@ -235,15 +235,14 @@ class DemandData:
             Tuple: (in_sample_data, scaled_demands) if debug_mode=False,
                 in_sample_data only if debug_mode=True
         """
-        from demand_generation import in_sample, demand_deterministic_landfall, data
 
         if self.population is None:
             raise ValueError("Population data not loaded. Call load_input_files() first.")
 
-        initial_state = data.state_space[0][0]
+        initial_state = state_space[0][0]
         S = num_sce
 
-        in_sample_data = in_sample(0, initial_state, S)
+        in_sample_data = new_in_sample(0, initial_state, S)
 
         # Save or return landfall states
         self.save_landfall_states(in_sample_data, network_processor, debug_mode=debug_mode)
@@ -254,7 +253,7 @@ class DemandData:
             sample_demands = []
             for t in network_processor.T_Bef:
                 track_err, intensity = in_sample_data[s, t]
-                demand = demand_deterministic_landfall(data, track_err, intensity, t)
+                demand = demand_generation(self.dp_loc_array, track_err, intensity, t, inputs)
                 sample_demands.append(demand)
             all_demands.append(sample_demands)
 
@@ -555,12 +554,10 @@ class DemandData:
     def msp_demand_mapping(self, t, k_t, network_processor):
         """Return a dict {i: demand_i(t)} based on realized state k_t."""
 
-        from demand_generation import demand_deterministic_landfall, data
-
         track_err, intensity = k_t
 
         # PoD-level demand (existing helper)
-        demand_vector = demand_deterministic_landfall(data, track_err, int(intensity), t)
+        demand_vector = demand_generation(self.dp_loc_array, track_err, int(intensity), t, inputs)
         scaled_pod = self.population * np.array(demand_vector)
 
         # Map PoD demand to shelters with inverse-distance weights

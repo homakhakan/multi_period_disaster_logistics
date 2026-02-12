@@ -40,7 +40,7 @@ class TwoStageSPModel:
         h_i = self.network_processor.h_i
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
-        t_ijt = self.network_processor.t_ijt   
+        t_ij = self.network_processor.t_ij   
         P = self.demand_processor.P
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
@@ -169,7 +169,7 @@ class TwoStageSPModel:
                 for t in range(1, T):
                     for s in sce:
                         outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
-                        incoming_flow = gp.quicksum(f[j, i, r, t - (t_ijt[j][i] + 1), s] for j in range(V) if (j, i) in A and t - (t_ijt[j][i] + 1) >= 0)
+                        incoming_flow = gp.quicksum(f[j, i, r, t - (t_ij[j][i] + 1), s] for j in range(V) if (j, i) in A and t - (t_ij[j][i] + 1) >= 0)
                         
                         # Inventory update constraint for shelters
                         if i in V1:
@@ -219,7 +219,7 @@ class TwoStageSPModel:
                     incoming = gp.LinExpr()
                     for j in range(V):
                         if (j, i) in A:
-                            t_prime = t - t_ijt[j][i] - 1 - h_i[i]
+                            t_prime = t - t_ij[j][i] - 1 - h_i[i]
                             if t_prime >= 0:
                                 incoming += K[j, i, t_prime]
                     m.addConstr(
@@ -319,7 +319,7 @@ class TwoStageSPModel:
         h_i = self.network_processor.h_i
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
-        t_ijt = self.network_processor.t_ijt   
+        t_ij = self.network_processor.t_ij 
         P = self.demand_processor.P
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
@@ -392,7 +392,7 @@ class TwoStageSPModel:
                 for t in range(t_tilda + 1, T):
                     for s in sce:
                         outgoing_flow = gp.quicksum(f[i, j, r, t, s] for j in range(V) if (i, j) in A)
-                        incoming_flow = gp.quicksum(f[j, i, r, t - (t_ijt[j][i] + 1), s] for j in range(V) if (j, i) in A and t - (t_ijt[j][i] + 1) >= t_tilda)
+                        incoming_flow = gp.quicksum(f[j, i, r, t - (t_ij[j][i] + 1), s] for j in range(V) if (j, i) in A and t - (t_ij[j][i] + 1) >= t_tilda)
                         
                         # Inventory update constraint for shelters
                         if i in V1:
@@ -481,7 +481,7 @@ class TwoStageSPModel:
         I_ir0 = self.network_processor.I_ir0
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
-        t_ijt = self.network_processor.t_ijt   
+        t_ij = self.network_processor.t_ij  
         P = self.demand_processor.P
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
@@ -553,10 +553,10 @@ class TwoStageSPModel:
                         
                         # Regular incoming flow (from inside RH window)
                         incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime, s] for j in range(V) for t_prime in range(t_bar, T)
-                                                            if (j, i) in A and t_prime == t_bar - (t_ijt[j][i] + 1))
+                                                            if (j, i) in A and t_prime == t_bar - (t_ij[j][i] + 1))
                         
                         incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_bar)
-                                                            if (j, i) in A and t_prime == t_bar - (t_ijt[j][i] + 1))
+                                                            if (j, i) in A and t_prime == t_bar - (t_ij[j][i] + 1))
 
                         total_incoming = incoming_flow_regular + incoming_flow_fixed
 
@@ -588,10 +588,10 @@ class TwoStageSPModel:
                         
                         # Regular incoming flow (from inside RH window)
                         incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime, s] for j in range(V) for t_prime in range(t_bar, T)
-                                                            if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
+                                                            if (j, i) in A and t_prime == t - (t_ij[j][i] + 1))
                         
                         incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_bar)
-                                                            if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
+                                                            if (j, i) in A and t_prime == t - (t_ij[j][i] + 1))
 
                         total_incoming = incoming_flow_regular + incoming_flow_fixed
 
@@ -721,7 +721,7 @@ class TwoStageSPModel:
         I_ir0 = self.network_processor.I_ir0
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
-        t_ijt = self.network_processor.t_ijt   
+        t_ij = self.network_processor.t_ij  
         P = self.demand_processor.P
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
@@ -775,10 +775,10 @@ class TwoStageSPModel:
                 outgoing_flow = gp.quicksum(f[i, j, r, t_L] for j in range(V) if (i, j) in A)
 
                 incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime] for j in range(V) for t_prime in range(t_L, T) 
-                                                    if (j, i) in A and t_prime == t_L - (t_ijt[j][i] + 1))
+                                                    if (j, i) in A and t_prime == t_L - (t_ij[j][i] + 1))
                 
                 incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_L) 
-                                                    if (j, i) in A and t_prime == t_L - (t_ijt[j][i] + 1))
+                                                    if (j, i) in A and t_prime == t_L - (t_ij[j][i] + 1))
 
                 total_incoming = incoming_flow_regular + incoming_flow_fixed
 
@@ -802,10 +802,10 @@ class TwoStageSPModel:
                     outgoing_flow = gp.quicksum(f[i, j, r, t] for j in range(V) if (i, j) in A)
 
                     incoming_flow_regular = gp.quicksum(f[j, i, r, t_prime] for j in range(V) for t_prime in range(t_L, T) 
-                                                        if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
+                                                        if (j, i) in A and t_prime == t - (t_ij[j][i] + 1))
                     
                     incoming_flow_fixed = gp.quicksum(self.fixed_flow[(j, i, r, t_prime)] for j in range(V) for t_prime in range(t_L) 
-                                                      if (j, i) in A and t_prime == t - (t_ijt[j][i] + 1))
+                                                      if (j, i) in A and t_prime == t - (t_ij[j][i] + 1))
 
                     total_incoming = incoming_flow_regular + incoming_flow_fixed
 
@@ -910,7 +910,7 @@ class TwoStageSPModel:
         """
         start_time = time.time()
 
-        from demand_generation import data, in_sample
+        from demand_gen_indep import new_in_sample
 
         nbOS = demand_processor.nbOS
         T = network_processor.T
@@ -941,11 +941,11 @@ class TwoStageSPModel:
                 # print("s_t:", s_t)
 
                 # Generate the demand at t_bar only based on the realized current state of the hurricane
-                demand_processor.generate_current_demand(t_bar, s_t, network_processor, data, solution_method=4)
+                demand_processor.generate_current_demand(t_bar, s_t, network_processor, solution_method=4)
 
                 # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
                 # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
-                in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
+                in_sample_paths = new_in_sample(t_bar, s_t, self.num_sce)
                 # print("in_sample_paths:", in_sample_paths)
 
                 # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
@@ -1049,7 +1049,7 @@ class TwoStageSPModel:
 
         Returns the average cost and the individual total costs for all sample paths.
         """
-        from demand_generation import data, in_sample
+        from demand_gen_indep import new_in_sample
 
         T = network_processor.T
         P = self.demand_processor.P
@@ -1089,11 +1089,11 @@ class TwoStageSPModel:
                 s_t = eval(sample_path_row[t_bar])  # Converts '(-23.55, 0)' to (-23.55, 0)
 
                 # Generate the demand at t_bar only based on the realized current state of the hurricane
-                demand_processor.generate_current_demand(t_bar, s_t, network_processor, data, solution_method=4)
+                demand_processor.generate_current_demand(t_bar, s_t, network_processor, solution_method=4)
 
                 # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
                 # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
-                in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
+                in_sample_paths = new_in_sample(t_bar, s_t, self.num_sce)
 
                 # Identify which in-sample scenario matches the realized state s_t
                 s_realized = None
@@ -1224,7 +1224,7 @@ class TwoStageSPModel:
         Each path is solved independently in a separate process.
         Returns the average cost and individual total costs.
         """
-        from demand_generation import data, in_sample
+        from demand_gen_indep import new_in_sample
 
         # Load all sample paths from CSV
         OS_paths_df = pd.read_csv(sample_paths_file)
@@ -1270,7 +1270,7 @@ class TwoStageSPModel:
         Solves a single out-of-sample sample path (k).
         Used by the parallel RH evaluation.
         """
-        from demand_generation import data, in_sample
+        from demand_gen_indep import new_in_sample
 
         t_L = network_processor.t_L
         T = network_processor.T
@@ -1287,11 +1287,11 @@ class TwoStageSPModel:
             s_t = eval(sample_path_row[t_bar])  # Converts '(-23.55, 0)' to (-23.55, 0)
 
             # Generate the demand at t_bar only based on the realized current state of the hurricane
-            demand_processor.generate_current_demand(t_bar, s_t, network_processor, data, solution_method=4)
+            demand_processor.generate_current_demand(t_bar, s_t, network_processor, solution_method=4)
 
             # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
             # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
-            in_sample_paths = in_sample(t_bar, s_t, self.num_sce)
+            in_sample_paths = new_in_sample(t_bar, s_t, self.num_sce)
 
             # Identify which in-sample scenario matches the realized state s_t
             s_realized = None
@@ -1360,7 +1360,7 @@ class TwoStageSPModel:
         I_ir0 = self.network_processor.I_ir0
         C_i0 = self.network_processor.C_i0
         h_i = self.network_processor.h_i
-        t_ijt = self.network_processor.t_ijt
+        t_ij = self.network_processor.t_ij
         K_ijt = self.network_processor.K_ijt
         w_r = self.network_processor.w_r
 
@@ -1400,7 +1400,7 @@ class TwoStageSPModel:
                     incoming = gp.LinExpr()
                     for j in range(V):
                         if (j, i) in A:
-                            t_prime = t - t_ijt[j][i] - 1 - h_i[i]
+                            t_prime = t - t_ij[j][i] - 1 - h_i[i]
                             if t_prime >= 0:
                                 incoming += self.K[j, i, t_prime]
                     self.master_model.addConstr(self.J[i, t + 1] == self.J[i, t] - outgoing + incoming, name="VehicleCont_%s_%s" % (i, t))
@@ -1460,7 +1460,7 @@ class TwoStageSPModel:
         V0 = self.network_processor.V0
         V1 = self.network_processor.V1
         V3 = self.network_processor.V3
-        t_ijt = self.network_processor.t_ijt
+        t_ij = self.network_processor.t_ij
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
         m_ij = self.network_processor.m_ij
@@ -1539,7 +1539,7 @@ class TwoStageSPModel:
                     # Add the constraint to the model
                     self.pi_opt_flow_conservation[i, r, t] = self.sub_opt.addConstr(
                         -gp.quicksum(self.f_opt[i, j, r, t] for j in range(V) if (i, j) in A)
-                        + gp.quicksum(self.f_opt[j, i, r, t - (t_ijt[j][i] + 1)] for j in range(V) if (j, i) in A and t - (t_ijt[j][i] + 1) >= 0)
+                        + gp.quicksum(self.f_opt[j, i, r, t - (t_ij[j][i] + 1)] for j in range(V) if (j, i) in A and t - (t_ij[j][i] + 1) >= 0)
                         - self.S_opt[i, t] * (g_shelter[r] if i in V1 else g_pod[r] if i in V3 else 0) == 0,
                         name=f"flow_conservation_opt_{i}_{r}_{t}")
         
@@ -1563,7 +1563,7 @@ class TwoStageSPModel:
         A = self.network_processor.A
         V1 = self.network_processor.V1
         V3 = self.network_processor.V3
-        t_ijt = self.network_processor.t_ijt
+        t_ij = self.network_processor.t_ij
         g_shelter = self.network_processor.g_shelter
         g_pod = self.network_processor.g_pod
         w_r = self.network_processor.w_r
@@ -1641,7 +1641,7 @@ class TwoStageSPModel:
                 for t in range(T - 1):
                     self.pi_feas_flow_conservation[i, r, t] = self.sub_feas.addConstr(
                         -gp.quicksum(self.f_feas[i, j, r, t] for j in range(V) if (i, j) in A)
-                        + gp.quicksum(self.f_feas[j, i, r, t - t_ijt[j][i] + 1] for j in range(V) if (i, j) in A and t - t_ijt[j][i] + 1 >= 0)
+                        + gp.quicksum(self.f_feas[j, i, r, t - t_ij[j][i] + 1] for j in range(V) if (i, j) in A and t - t_ij[j][i] + 1 >= 0)
                         - self.S_feas[i, t] * (g_shelter[r] if i in V1 else g_pod[r] if i in V3 else 0)
                         + self.epsilon_1[i, r, t] - self.epsilon_2[i, r, t] == 0,
                         name=f"flow_conservation_feas_{i}_{r}_{t}")
@@ -1676,7 +1676,7 @@ class TwoStageSPModel:
         V1 = self.network_processor.V1
         V3 = self.network_processor.V3
 
-        t_ijt = self.network_processor.t_ijt
+        t_ij = self.network_processor.t_ij
         p_i = self.network_processor.p_i
         cost_ir = self.network_processor.cost_ir
         m_ij = self.network_processor.m_ij

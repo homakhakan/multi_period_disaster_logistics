@@ -1,0 +1,69 @@
+{
+  "T_original": {
+    "value": 11,
+    "description": "The original number of 12-hour time periods (includes 0h)."
+  },
+  "start_year": {
+    "value": 1970,
+    "description": "Earliest year of data to include."
+  },
+  "LONG_TO_MILES": {
+    "value": 54.6,
+    "description": "Miles per degree longitude (approx)."
+  },
+  "LAT_TO_MILES": {
+    "value": 69.0,
+    "description": "Miles per degree latitude (approx)."
+  },
+  "CRS": {
+    "value": "EPSG:4326",
+    "description": "Coordinate reference system used for GeoDataFrames."
+  },
+  "H": {
+    "value": 120,
+    "description": "Forecast horizon in hours (must be multiple of 12)."
+  },
+  "demand_lead_time": {
+    "value": 48,
+    "description": "Lead-time to observe the first demand (evacuation window)."
+  },
+  "segments": {
+    "value": 1,
+    "description": "Number of subdivisions inside each 12-hour period."
+  },
+  "n_states_at_terminal": {
+    "value": 5,
+    "description": "Target maximum number of discretized states at terminal period."
+  },
+  "num_scen": {
+    "value": 10000,
+    "description": "The number of AR(1) scenarios to simulate."
+  },
+  "ar_1_sample": {
+    "value": 1,
+    "description": "If 1, use AR(1) model of forecast error; else use true samples to train the MC model."
+  },
+  "X_rotate": {
+    "value": 0.7126728510722663,
+    "description": "Rotation coefficient for projecting cross-track error onto longitude axis"
+  },
+  "Y_rotate": {
+    "value": 0.7014965483482632,
+    "description": "Rotation coefficient for projecting cross-track error onto latitude axis"
+  },
+  "study_region_dist": {
+    "value": 569.1614880777536,
+    "description": "Maximum lateral distance from study region that can generate demand (miles)"
+  },
+  "demand_frac_by_cat": {
+    "value": {
+      "0": 0.0,
+      "1": 0.2,
+      "2": 0.4,
+      "3": 0.6,
+      "4": 0.8,
+      "5": 1.0
+    },
+    "description": "Normalized evacuation demand fraction as a function of hurricane category (0–5)"
+  }
+}

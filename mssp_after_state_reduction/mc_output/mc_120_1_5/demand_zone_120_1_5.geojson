@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "demand_zone_120_1_5",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { }, "geometry": { "type": "Polygon", "coordinates": [ [ [ -72.805634674102862, 21.500636704478538 ], [ -65.376588146100914, 27.28708336156992 ], [ -76.050076735999028, 35.86762332854569 ], [ -83.479123264000975, 30.081176671454308 ], [ -72.805634674102862, 21.500636704478538 ] ] ] } }
+]
+}

@@ -9,37 +9,21 @@ import argparse
 import yaml
 from shapely.geometry import Point, LineString
 import copy
+import json
 import math
 
-# === Setup to use Sudhan's repo ===
-#test
-# Step 1: Define repo path (relative)
-friend_dir = os.path.join(os.path.dirname(__file__), "MSSP_IHRLEP_Networks")
-
-# Step 2: Add it to sys.path to allow imports
-sys.path.append(friend_dir)
-
-# Step 3: Temporarily set working directory to Sudhan's repo
-os.chdir(friend_dir)
-
-# Step 4: Import from external code
-from data_main import Data
-from demand_generation import in_sample, demand_deterministic_landfall, data
-import commands
-import helper
-
-# Step 5: Switch back to original repo root
-os.chdir(os.path.dirname(__file__))
-
 # === My own project modules ===
+from demand_gen_indep import new_in_sample, demand_generation, inputs
 from demand_data import DemandData
 from network_data import NetworkData
 from twostage_model import TwoStageSPModel
 import output
 from output import save_full_oos_demand
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mc_ins", type=str, required=True, help="MC instance folder name under mc_output, e.g. mc_H_segments_terminalstates")
     parser.add_argument("-ns", "--num_sce", type = int, help="Number of scenarios")
     parser.add_argument("-iv", "--instance_version", type=str, choices=["large", "small"])
     parser.add_argument("-c", "--commodity", type=str, choices=["water", "food", "both"], required=True, help="Commodity type: water, food, or both")
@@ -58,8 +42,6 @@ if __name__ == "__main__":
 
     with open("fixed_params.yaml", "r") as f:
         params = yaml.safe_load(f)
-    # params["T1"] = data.T # Inject T1 from external repo
-    data.tau = int(params["tau"]) # Force external runtime object to use your tau
 
     thetaLB = float(params["THETA_LB"])
     eps = float(params["EPS"])
@@ -235,7 +217,9 @@ if __name__ == "__main__":
         rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
         
         # Provide the sample path file path here (update the path as needed)
-        sample_paths_file = "Data/real_OOS_paths.csv"
+        instance_dir = os.path.join("mc_output", args.mc_ins)
+        suffix = args.mc_ins.replace("mc_", "")  # "60_2_5"
+        sample_paths_file = os.path.join(instance_dir, f"real_OOS_paths_{suffix}.csv")
 
         avg_cost, total_costs, total_time = rh_model_instance.RH_evaluation(
             sample_paths=sample_paths_file,
@@ -297,13 +281,27 @@ if __name__ == "__main__":
         from msp_helper import create_OSpaths
 
         # Initialize model instance
-        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params, args.travel_time, args.last_stage)
+        sddp_model_instance = MultiStageSPModel(network_processor, demand_processor, params, args.travel_time, args.last_stage, args.mc_ins)
         
-        """
-        # Path where we save or load OOS paths
-        sample_paths_file = "Data/real_OOS_paths.csv"
+        '''
+        # Load MC parameters used for naming
+        instance_dir = os.path.join("mc_output", args.mc_ins) # Instance-specific MC folder (required)
+        with open("mc_data/inputs.json", "r") as f:
+            raw = json.load(f)
+        mc_args = {k: (v["value"] if isinstance(v, dict) and "value" in v else v) for k, v in raw.items()}
+        H = mc_args["H"]
+        segments = mc_args["segments"]
+        n_states_at_terminal = mc_args["n_states_at_terminal"]
 
-        # === STEP 1: CREATE OOS PATHS (ONLY FIRST TIME) ===
+        # (Optional safety check)
+        expected = f"mc_{H}_{segments}_{n_states_at_terminal}"
+        if args.mc_ins != expected:
+            raise ValueError(f"--mc_ins={args.mc_ins} but inputs.json implies {expected}")
+        
+        # Path where we save or load OOS paths
+        sample_paths_file = os.path.join(instance_dir, f"real_OOS_paths_{H}_{segments}_{n_states_at_terminal}.csv")
+
+        # CREATE OOS PATHS (ONLY ONE TIME)
         if not os.path.exists(sample_paths_file):
             print(f"[INFO] OOS paths file not found. Generating {demand_processor.nbOS} sample paths...")
             create_OSpaths(
@@ -315,7 +313,8 @@ if __name__ == "__main__":
         else:
             print(f"[INFO] Using existing OOS paths file: {sample_paths_file}")
         exit(0)
-        """
+        '''
+        
         # # === PROFILE SDDP TRAINING ===
         # print(f"\n[PROFILING] SDDP Training in process ...")
         # prof_train = cProfile.Profile()
@@ -335,7 +334,9 @@ if __name__ == "__main__":
 
         # Run OOS Evaluation for SDDP 
         print("\nStarting SDDP Out-of-Sample Evaluation...")
-        sample_paths_file = "Data/real_OOS_paths.csv"
+        instance_dir = os.path.join("mc_output", args.mc_ins)
+        suffix = args.mc_ins.replace("mc_", "")  # "60_2_5"
+        sample_paths_file = os.path.join(instance_dir, f"real_OOS_paths_{suffix}.csv")
 
         results = sddp_model_instance.sddp_eval(sample_paths_file, demand_processor)
 
@@ -431,7 +432,9 @@ if __name__ == "__main__":
             dist_file = "Data/Distance_podtoshelter_large.xlsx"
         demand_processor.load_input_files(population_file="Data/PoD location information.xlsx", distance_file=dist_file, network_processor=network_processor)
 
-        sample_paths_file = "Data/real_OOS_paths.csv"
+        instance_dir = os.path.join("mc_output", args.mc_ins)
+        suffix = args.mc_ins.replace("mc_", "")  # "60_2_5"
+        sample_paths_file = os.path.join(instance_dir, f"real_OOS_paths_{suffix}.csv")
         
         # Load OOS sample paths (CSV)
         OS_paths_df = pd.read_csv(sample_paths_file)  # e.g., "real_sample_paths.csv"
@@ -449,7 +452,7 @@ if __name__ == "__main__":
             demand_processor.d_its = {}
 
             # Generate pre-landfall demand at t=0
-            demand_processor.generate_current_demand(t_bar=0, s_t=s_t0, network_processor=network_processor, data=data, solution_method=args.solution_method)
+            demand_processor.generate_current_demand(t_bar=0, s_t=s_t0, network_processor=network_processor, solution_method=args.solution_method)
 
             # Clean the realized sample path row
             realized_path = [eval(state.replace('\x00', '')) for state in sample_path_row]
