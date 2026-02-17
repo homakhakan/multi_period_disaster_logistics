@@ -19,10 +19,13 @@ class NetworkData:
         self.thetaLB = float(params["THETA_LB"])
         self.eps = float(params["EPS"])
         self.T1 = int(H / self.tperiod)
-        self.T2 = int(params["T2"])
+        self.T2 = math.ceil((0.6 * H) / self.tperiod) # Relative to T1
         self.total_hours = (self.T1 + self.T2) * self.tperiod
         self.fuel_cost_per_mile = float(params["FUEL_COST_PER_MILE"])
         self.base_cap = int(params["BASE_CAP"])
+        # print("T1:", self.T1)
+        # print("T2:", self.T2)
+        # exit(0)
 
         # Load file paths
         self.get_file_paths()
@@ -153,8 +156,8 @@ class NetworkData:
         self.R = len(selected_columns)  # Number of resources
         # print("R=", self.R)
 
-        
-        self.I_ir0 = [Inv[i:i+self.R] for i in range(0, len(Inv), self.R)]
+        self.multiplier_init_inv = float(self.params["MULTIPLIER_INIT_INV"])
+        self.I_ir0 = [[value * self.multiplier_init_inv for value in Inv[i:i+self.R]] for i in range(0, len(Inv), self.R)]
         # print(self.I_ir0)
 
         # Penalty costs per location
@@ -184,8 +187,7 @@ class NetworkData:
         self.h_i = self.df_V['TruckDelay'].tolist()
 
         # Travel cost between locations
-        self.multiplier_trans_cost = float(self.params["MULTIPLIER_TRANS_COST"])  # Scaling factor
-        self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) * self.multiplier_trans_cost for j in range(len(self.df_V))] for i in range(len(self.df_V))]
+        self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) for j in range(len(self.df_V))] for i in range(len(self.df_V))]
     
         # # Convert m_ij into a DataFrame with row and column labels
         # df_mij = pd.DataFrame(self.m_ij, columns=self.df_V.index, index=self.df_V.index)

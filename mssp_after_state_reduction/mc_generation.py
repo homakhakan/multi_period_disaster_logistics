@@ -67,10 +67,8 @@ for err in err_grp:
 
 '''Load the point forecast and study region data'''
 # geometry parameters
-with open('mc_data/geom_params.json', 'r') as f:
-    geom_params = json.load(f)
-x_rotate = geom_params['X_rotate']  # to rotate axis along study region
-y_rotate = geom_params['Y_rotate']  # to rotate axis along study region
+x_rotate = args['X_rotate']  # to rotate axis along study region
+y_rotate = args['Y_rotate']  # to rotate axis along study region
 # SC map and study regions as GeoDataFrame
 geoms = gpd.read_file("mc_data/geoms.geojson")
 geoms.crs = args['CRS']
@@ -1110,14 +1108,14 @@ with open(out_path, 'w') as export_file:
 
 tau_12h = int(args['demand_lead_time'] / 12) + 1
 tau = len(range((tau_12h - 1) * args['segments'] + 1))
-study_line = geoms.loc[geoms['object']=='study_region', 'geometry'].values[0]
-study_region_dist = geom_params['study_region_dist']
+study_line = geoms.loc[geoms['object']=='study_region', 'geometry'].values[0]   # Extract the geometry (line) representing the study region (e.g., coastline)
+study_region_dist = args['study_region_dist']                                   # Maximum lateral distance from study region that can generate demand (miles)
 '''along-distance from the starting point of evacuation to the study region'''
-forecast_loc_tau = forecast_ext.loc[
+forecast_loc_tau = forecast_ext.loc[                                            # Get the hurricane’s location at the time demand starts
     T_exteneded - tau, ['Longitude', 'Latitude']
     ].values
-study_line_extended = extend_straight_line(study_line, 10**3)
-interpolated_dist = study_line_extended.project(
+study_line_extended = extend_straight_line(study_line, 10**3)                   # Extend the study-region line so projections always work (avoid edge issues)
+interpolated_dist = study_line_extended.project(                                # Project the hurricane point onto the study line
     Point(forecast_loc_tau), normalized=True
     )
 
@@ -1132,8 +1130,8 @@ os.makedirs(instance_dir, exist_ok=True)
 out_path = os.path.join(instance_dir, file_name)
 gpd.GeoSeries([study_line_extended], crs=args["CRS"]).to_file(out_path, driver="GeoJSON")
 # ----------------------------------------------------------------------------------
-nearest_pt = study_line_extended.interpolate(interpolated_dist, normalized=True)
-x_max = np.sqrt(
+nearest_pt = study_line_extended.interpolate(interpolated_dist, normalized=True) # Convert that relative position into the closest point on the study line
+x_max = np.sqrt(                                                                 # Compute distance (in miles) from hurricane to study region at demand start
     ((forecast_loc_tau[0] - nearest_pt.x) * args['LONG_TO_MILES']) ** 2 +
     ((forecast_loc_tau[1] - nearest_pt.y) * args['LAT_TO_MILES']) ** 2
 )

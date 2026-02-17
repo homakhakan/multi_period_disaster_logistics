@@ -109,7 +109,7 @@ if __name__ == "__main__":
         # Print and save results
         if ext_model.Status == gp.GRB.OPTIMAL:
             print(f"\nOptimal Objective Value: {ext_model.ObjVal}")
-            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier_penalty_cost, network_processor.multiplier_trans_cost, network_processor.multiplier_arc, model_version=args.model, output_filename="Results/ext_results.xlsx")
+            output.ext_results(ext_model_instance, ext_model, args.instance_version, args.num_sce, end_time_ext - start_time_ext, network_processor.multiplier_penalty_cost, network_processor.multiplier_init_inv, network_processor.multiplier_arc, model_version=args.model, output_filename="Results/ext_results.xlsx")
             
             fixed_I_irt = ext_model_instance.extract_all_inventory(I_vars)
         else:

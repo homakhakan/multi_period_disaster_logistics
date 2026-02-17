@@ -1085,6 +1085,11 @@ class MultiStageSPModel:
                 for hr, gap in hourly_gaps:
                     writer.writerow([hr, gap])
 
+        # To be able to write them in excel file
+        self.LB = LB
+        self.train_time = train_time
+        self.total_iter = iter
+
         return LB, train_time, iter
     
     # Evaluate model
@@ -1515,9 +1520,9 @@ class MultiStageSPModel:
 
             # Printing amount of variables
             print("Average amount of unmet demand=", np.mean(unmet_amount))
-            print("Average amount of satisfied demand=", np.mean(satisfied_amount))
             print("Average amount of procurement=", np.mean(proc_amount))
             print("Average amount of transportation=", np.mean(trans_amount))
+            print("Average amount of satisfied demand=", np.mean(satisfied_amount))
 
             # Plotting avg satisfied demand over time
             avg_satisfied = np.mean(satisfied_over_time, axis=0)  # shape: (T1,)
@@ -1529,7 +1534,7 @@ class MultiStageSPModel:
             plt.title('Average Satisfied Demand Over Time')
             plt.grid(True)
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"avg_satisfied_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_satisfied_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
 
@@ -1543,7 +1548,7 @@ class MultiStageSPModel:
             plt.title('Average Overall Demand Over Time')
             plt.grid(True)
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"avg_total_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_total_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
 
@@ -1557,7 +1562,7 @@ class MultiStageSPModel:
             plt.ylabel('Average Inventory Level')
             plt.title('Average Inventory at Shelters Over Time')
             plt.grid(True)
-            save_path = os.path.join("Heat map", f"avg_inevntory_shelter_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_inevntory_shelter_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
             
@@ -1570,7 +1575,7 @@ class MultiStageSPModel:
             plt.title('Average Inventory at PoDs Over Time')
             plt.grid(True)
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"avg_inevntory_pod_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_inevntory_pod_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
             
@@ -1594,6 +1599,49 @@ class MultiStageSPModel:
             print(f"μ ± 1.96*σ/√NS = {mean_obj} ± {CI}")
             print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
             test_time = time.time() - start
+
+            # ------------------ Write results to excel ----------------------
+
+            results = [
+
+                # ---- Training Info ----
+                ("Iterations", self.total_iter),
+                ("Training Time (seconds)", self.train_time),
+                ("Final LB", self.LB[-1]),
+                ("", ""),
+
+                # ---- Amounts ----
+                ("Average amount of unmet demand", float(np.mean(unmet_amount))),
+                ("Average amount of satisfied demand", float(np.mean(satisfied_amount))),
+                ("Average amount of procurement", float(np.mean(proc_amount))),
+                ("Average amount of transportation", float(np.mean(trans_amount))),
+
+                ("", ""),
+
+                # ---- Costs ----
+                ("Average Penalty Cost Pre", float(np.mean(penalty_cost_pre))),
+                ("Average Penalty Cost Post", float(np.mean(penalty_cost_post))),
+                ("Average Procurement Cost Pre", float(np.mean(proc_cost_pre))),
+                ("Average Procurement Cost Post", float(np.mean(proc_cost_post))),
+                ("Average Transportation Cost Pre", float(np.mean(trans_cost_pre))),
+                ("Average Transportation Cost Post", float(np.mean(trans_cost_post))),
+                ("Average Penalty Cost Pre (reconstructed with deprivation)", float(np.mean(penalty_cost_pre_with_dep))),
+                ("Average Penalty Cost Post (reconstructed with deprivation)", float(np.mean(penalty_cost_post_with_dep))),
+
+                ("", ""),
+
+                # ---- Objective summary (formatted exactly like terminal) ----
+                ("μ ± 1.96*σ/√NS",
+                f"{mean_obj} ± {CI}"),
+
+                ("95% Confidence Interval",
+                f"[{ci_low:.2f}, {ci_high:.2f}]"),
+
+                ("Evaluation Time (sec)", float(test_time)),
+            ]
+
+            df = pd.DataFrame(results, columns=["Metric", "Value"])
+            df.to_excel("sddp_results.xlsx", sheet_name="results", index=False)
 
             # ========================= Heat map ==============================
             # Computing average inventory per intensity per stage
@@ -1619,7 +1667,7 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"inventory_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
+            save_path = os.path.join("Heat map", f"inventory_penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}.png")
             plt.savefig(save_path, dpi=300)
             
             # Plotting unmet demand heat map
@@ -1640,7 +1688,7 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"unmet_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
+            save_path = os.path.join("Heat map", f"unmet_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}.png")
             plt.savefig(save_path, dpi=300)
 
             # Plotting satisfied demand heat map
@@ -1661,7 +1709,7 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"satisfied_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
+            save_path = os.path.join("Heat map", f"satisfied_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}.png")
             plt.savefig(save_path, dpi=300)
             # =====================================================================
 

@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import time
 
-# np.random.seed(42)
+# np.random.seed()
 
 # def load_transition_dict(path):
 #     with open(path, "r") as f:

@@ -6,6 +6,7 @@ from demand_data import DemandData
 import time
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from demand_gen_indep import new_in_sample
 
 class TwoStageSPModel:
     def __init__(self, network_processor, demand_processor, num_sce):
@@ -445,24 +446,6 @@ class TwoStageSPModel:
         m.update()
 
         return m, I
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def RH_model_creator(self, t_bar, sol):
 
@@ -910,7 +893,7 @@ class TwoStageSPModel:
         """
         start_time = time.time()
 
-        from demand_gen_indep import new_in_sample
+        # from demand_gen_indep import new_in_sample
 
         nbOS = demand_processor.nbOS
         T = network_processor.T
@@ -1049,7 +1032,7 @@ class TwoStageSPModel:
 
         Returns the average cost and the individual total costs for all sample paths.
         """
-        from demand_gen_indep import new_in_sample
+        # from demand_gen_indep import new_in_sample
 
         T = network_processor.T
         P = self.demand_processor.P
@@ -1224,7 +1207,7 @@ class TwoStageSPModel:
         Each path is solved independently in a separate process.
         Returns the average cost and individual total costs.
         """
-        from demand_gen_indep import new_in_sample
+        # from demand_gen_indep import new_in_sample
 
         # Load all sample paths from CSV
         OS_paths_df = pd.read_csv(sample_paths_file)
@@ -1270,7 +1253,7 @@ class TwoStageSPModel:
         Solves a single out-of-sample sample path (k).
         Used by the parallel RH evaluation.
         """
-        from demand_gen_indep import new_in_sample
+        # from demand_gen_indep import new_in_sample
 
         t_L = network_processor.t_L
         T = network_processor.T

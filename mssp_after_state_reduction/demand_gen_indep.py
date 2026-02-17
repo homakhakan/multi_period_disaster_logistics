@@ -15,7 +15,7 @@ import scipy
 from sklearn.preprocessing import QuantileTransformer
 from dataclasses import dataclass
 from typing import Callable
-# np.random.seed(42)
+# np.random.seed()
 
 
 # -------------------- load args from inputs.json --------------------------------------
@@ -199,16 +199,12 @@ def demand_generation(dp_loc_array, track_error, hurr_cat, t, inputs):
         return demand
     # 1. demand by intensity
     demand_by_cat = float(inputs.demand_frac_by_cat[hurr_cat])
-    # print("demand by cat:", demand_by_cat)
     # 2. demand by time (W.R.T. the forward speed towards study region)
     diff_x = np.sqrt(
         ((proj_point.x - x) * inputs.long_to_miles) ** 2 +
         ((proj_point.y - y) * inputs.lat_to_miles) ** 2
         )
-    # print("diff_x:",diff_x)
-    # print("x_max:", inputs.x_max)
     demand_by_time = max(1e-9, 1 - diff_x / inputs.x_max)
-    # print("demand by time:", demand_by_time)
     # 3. demand by track error (W.R.T lateral distance along the study region)
     diff_y = np.zeros(I)
     for i in range(I):
@@ -217,10 +213,8 @@ def demand_generation(dp_loc_array, track_error, hurr_cat, t, inputs):
             ((proj_point.y - dp_loc_array[i, 1]) * inputs.lat_to_miles)**2
             )
         demand_by_track = max(1e-9, 1 - diff_y / inputs.study_region_dist)
-        # print("demand by track:", demand_by_track)
         # combined demand
         demand[i] = demand_by_track * demand_by_time * demand_by_cat
-    # print("demand:", demand)
     return demand
 
 # -----------------------------------------------------------------------------------------------
