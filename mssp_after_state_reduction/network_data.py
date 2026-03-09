@@ -162,8 +162,8 @@ class NetworkData:
 
         # Penalty costs per location
         self.multiplier_penalty_cost = float(self.params["MULTIPLIER_PENALTY_COST"])
-        self.p_i = (self.df_V["P_i"] * self.multiplier_penalty_cost).tolist()
-        
+        self.p_i = (self.df_V["P_i"] * self.multiplier_penalty_cost * (self.tperiod / 12)).tolist() # Scaling penalty cost relative to different time intervals
+
         if travel_time == 1:
             # Travel time in time periods (travel times are only 1 time period)
             self.t_ij = np.ones((self.V, self.V), dtype=int)  # fill with 1s
@@ -174,11 +174,31 @@ class NetworkData:
                     if i != j and self.durationMatrix[i][j] == 0:
                         self.t_ij[i][j] = 0
 
+        # elif travel_time == 2:
+        #     # Load fixed t_ij travel time matrix from file (travel times are more than 1 time period)
+        #     # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
+        #     self.t_ij = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
+        #     self.tt_max = np.max(self.t_ij) # Extract the maximum travel time (without delay) to later use in sddp for saving some computational time
+
         elif travel_time == 2:
-            # Load fixed t_ij travel time matrix from file (travel times are more than 1 time period)
-            # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
-            self.t_ij = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
-            self.tt_max = np.max(self.t_ij) # Extract the maximum travel time (without delay) to later use in sddp for saving some computational time
+            # Multi-period travel time computed from real duration matrix
+            # durationMatrix is in seconds
+            # tperiod is in hours (3, 6)
+
+            dur_seconds = np.array(self.durationMatrix, dtype=float)
+            dur_hours = (dur_seconds / 3600) * 1.75 # #Hardcode! # Convert seconds to hours # scaling factor to include loading/unloading/etc. 
+            self.t_ij = np.ceil(dur_hours / self.tperiod).astype(int) # Compute travel time in number of time periods
+            np.fill_diagonal(self.t_ij, 0) # Keep diagonal = 0
+
+            # If any off-diagonal duration is 0, keep it 0
+            for i in range(self.V):
+                for j in range(self.V):
+                    if i != j and dur_seconds[i][j] == 0:
+                        self.t_ij[i][j] = 0
+            # print(self.t_ij)
+            # exit(0)
+
+            self.tt_max = int(np.max(self.t_ij)) # Extract the maximum travel time (without delay) to later use in sddp for saving some computational time
 
         #Starting number of trucks at location i (time period 0)
         self.C_i0 = self.df_V["TruckStart"].tolist()

@@ -37,6 +37,7 @@ if __name__ == "__main__":
     parser.add_argument("-ls", "--last_stage", type=int, choices=[1, 2], help="Last stage mode: 1. Last stage includes one single period, 2. Last stage includes multiple periods")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("-tilda", "--t_tilda", type=int, help="Waiting time (t_tilda) before starting the Wait-and-See (WS) 2SSP model") 
+    parser.add_argument("-nsm", "--num_sce_mean", type=int, default=None, help="Number of scenarios used to compute mean demand for deterministic RH (only used when -sm 4 and -ns 1)") # Deterministic mean value RH
 
     args = parser.parse_args()
 
@@ -97,7 +98,7 @@ if __name__ == "__main__":
 
     # Run only the selected model
     if args.solution_method == 1:
-        ext_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        ext_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce, args.num_sce_mean)
         start_time_ext = time.time()
 
         ext_model, I_vars = ext_model_instance.ext_model(model_version=args.model)
@@ -118,7 +119,7 @@ if __name__ == "__main__":
         print(f"Total Execution Time for Extended Model: {total_time_ext:.2f} seconds")
 
     elif args.solution_method == 2:
-        benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        benders_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce, args.num_sce_mean)
         benders_model_instance.master_problem(thetaLB, model_version=args.model)
         benders_model_instance.optimality_sub(model_version=args.model)
         benders_model_instance.feasibility_sub(model_version=args.model)
@@ -183,7 +184,7 @@ if __name__ == "__main__":
         # for key in sorted(demand_processor.d_its):
         #     print(f"  {key}: {demand_processor.d_its[key]}")
 
-        model_instance = TwoStageSPModel(network_processor, demand_processor, 1)
+        model_instance = TwoStageSPModel(network_processor, demand_processor, 1, args.num_sce_mean)
         model, _ = model_instance.ext_model(model_version=args.model)
         model.optimize()
 
@@ -214,7 +215,7 @@ if __name__ == "__main__":
         print(f"True MVP Objective Value, averaged over all scenarios: {mvp_obj_value}")
 
     elif args.solution_method == 4:
-        rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce, args.num_sce_mean)
         
         # Provide the sample path file path here (update the path as needed)
         instance_dir = os.path.join("mc_output", args.mc_ins)
@@ -237,7 +238,7 @@ if __name__ == "__main__":
         )
 
     elif args.solution_method == 5:
-        rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        rh_model_instance = TwoStageSPModel(network_processor, demand_processor, args.num_sce, args.num_sce_mean)
         
         sample_paths_file = "Data/real_sample_paths.csv"  # make sure this exists on Palmetto
 
@@ -379,7 +380,7 @@ if __name__ == "__main__":
             # for idx, key in enumerate(demand_processor.d_its):
             #     print(f"{key}: {demand_processor.d_its[key]}")
 
-            model_instance = TwoStageSPModel(network_processor, demand_processor, 1)
+            model_instance = TwoStageSPModel(network_processor, demand_processor, 1, args.num_sce_mean)
             model, _ = model_instance.ext_model(model_version=args.model)
             model.optimize()
 
@@ -403,7 +404,7 @@ if __name__ == "__main__":
         t_tilda = args.t_tilda
         print(f"Running Wait-and-See 2SSP with t_tilda = {t_tilda}")
 
-        Wait_and_See = TwoStageSPModel(network_processor, demand_processor, args.num_sce)
+        Wait_and_See = TwoStageSPModel(network_processor, demand_processor, args.num_sce, args.num_sce_mean)
         ws_model, I_vars = Wait_and_See.WS_model(t_tilda)
         ws_model.optimize()
 

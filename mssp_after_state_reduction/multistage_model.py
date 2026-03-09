@@ -660,8 +660,15 @@ class MultiStageSPModel:
                     if t < self.t_L:
                         for i in range(self.V):
                             for r in range(self.R):
-                                I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
-                            U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
+                                if abs(self.I[t, k_t][i, r].x) < 1e-6:
+                                    I_prev[i, r, t] = 0
+                                else:
+                                    I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
+                            
+                            if abs(self.U[t, k_t][i].x) < 1e-6:
+                                U_prev[i, t] = 0
+                            else:
+                                U_prev[i, t] = self.U[t, k_t][i].x # Extract demand shortage (state var)
 
                         if self.travel_time == 2: 
                             for j in range(self.V):
@@ -699,6 +706,8 @@ class MultiStageSPModel:
         # We are at stage t and updating rhs for constraints in stage t, so we check the condition at this stage but add the state variables from previous stage.
             for r in range(self.R):         
                 rhs_val = I_prev[i, r, t - 1] + f1_prev[i, r, 1, t - 1]
+                # if abs(rhs_val) < 1e-6:
+                #     rhs_val = 0
                 self.inventory_update_constr1[t, k_t][i, r].setAttr(GRB.Attr.RHS, rhs_val)
                 self.inventory_update_constr2[t, k_t][i, r].setAttr(GRB.Attr.RHS, rhs_val)
 
@@ -717,7 +726,7 @@ class MultiStageSPModel:
                         self.in_transit_update_constr1[t, k_t][j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
                         self.in_transit_update_constr2[t, k_t][j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
     
-    """
+    # """
     def update_rhs_time1(self, t, k_t, I_prev, U_prev):
         # Update right-hand sides of the (t , k_t) model constraints before optimization.
         
@@ -734,7 +743,7 @@ class MultiStageSPModel:
             for r in range(self.R):
                 self.inventory_update_constr1[t, k_t][i, r].setAttr(GRB.Attr.RHS, I_prev[i, r, t - 1])
                 self.inventory_update_constr2[t, k_t][i, r].setAttr(GRB.Attr.RHS, I_prev[i, r, t - 1])
-    """
+    # """
 
     def backward_pass(self, I_prev, U_prev, f1_prev, thetaval, state_path):
         
@@ -896,7 +905,7 @@ class MultiStageSPModel:
 
         return cutviolFlag
     
-    """
+    # """
     def backward_pass_time1(self, I_prev, U_prev, thetaval, state_path):
                 
         cutviolFlag = False
@@ -994,7 +1003,7 @@ class MultiStageSPModel:
                                         >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
                
         return cutviolFlag
-    """
+    # """
 
     # Train model
     def solve_sddp(self):
@@ -1094,6 +1103,7 @@ class MultiStageSPModel:
     
     # Evaluate model
     def sddp_eval(self, sample_paths_file, demand_processor):
+        # from demand_gen_indep import demand_generation, inputs # infeas
         
         if self.last_stage == 1:
             nbOS = demand_processor.nbOS
@@ -1322,14 +1332,27 @@ class MultiStageSPModel:
             satisfied_sum = np.zeros((6, self.T1 - 1)) # An array holding the sum of S values (per intensity per time) across all sample paths
             visit_count = np.zeros((6, self.T1 - 1)) # An array to count how many sample paths visit each (intensity, time) pair 
             
+            # # infeas
+            # violation_count = 0
+
             for s in range(nbOS):
                 I_prev = np.zeros((self.V, self.R, self.T1))
                 U_prev = np.zeros((self.V, self.T1))
+                
+                # # infeas
+                # cum_frac_pod = np.zeros(len(demand_processor.dp_loc_array)) # Checking if the accumulated demand fraction exceeds 1 (exceeds population)
+                
                 if self.travel_time == 2:
                     f1_prev = np.zeros((self.V, self.R, self.T1, self.T1))
                 U_bucket = np.zeros((self.V, self.T))  # allow ages up to full horizon (pre + post landfall)
                 for t in range(self.T1):
-                    k_t = eval(OS_paths[s, t]) 
+                    k_t = eval(OS_paths[s, t])
+
+                    # # infeas
+                    # track_err, intensity = k_t
+                    # frac_vec = demand_generation(demand_processor.dp_loc_array, track_err, int(intensity), t, inputs)
+                    # cum_frac_pod += np.array(frac_vec)
+
                     if t > 0:
                         intensity = k_t[1]  # extract the intensity from (track_error, intensity)
                         visit_count[intensity][t - 1] += 1 # Update count
@@ -1340,6 +1363,7 @@ class MultiStageSPModel:
                     self.m[t, k_t].optimize()
                     if self.m[t, k_t].status != GRB.OPTIMAL:
                         print(" in evaluation")
+                        self.m[t, k_t].write(f"In_eval_Error_Forward_t{t}_k{k_t}.lp")
                         print(f"Model in stage = {t} and state = {k_t}, in forward pass is {self.m[t,k_t].status}")
                         exit(0)
                     else:
@@ -1517,6 +1541,14 @@ class MultiStageSPModel:
                     # Computing penalty cost before landfall for each sample path
                     for i in self.V1:
                         penalty_cost_pre[s] += self.p_i[i] * Uval[s, t][i]
+
+                # # infeas
+                # if np.any(cum_frac_pod > 1 + 1e-6):
+                #     violation_count += 1
+                #     print(f"[DemandFractionViolation] sample path {s}: max cum frac = {cum_frac_pod.max()}")
+                #     # print(f"Full vector = {cum_frac_pod}")
+            # # infeas
+            # print(f"Total number of violating sample paths = {violation_count} out of {nbOS}")
 
             # Printing amount of variables
             print("Average amount of unmet demand=", np.mean(unmet_amount))

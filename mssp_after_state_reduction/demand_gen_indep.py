@@ -15,7 +15,7 @@ import scipy
 from sklearn.preprocessing import QuantileTransformer
 from dataclasses import dataclass
 from typing import Callable
-# np.random.seed()
+# np.random.seed(42)
 
 
 # -------------------- load args from inputs.json --------------------------------------
@@ -155,6 +155,7 @@ class DemandMapInputs:
     T_exteneded: int
     tau: int
     x_max: float
+    segments: int
 
     # mapping
     demand_frac_by_cat: dict
@@ -171,7 +172,8 @@ inputs = DemandMapInputs(
     T_exteneded=T_exteneded,
     tau=tau,
     x_max=x_max,
-    demand_frac_by_cat=demand_frac_by_cat
+    demand_frac_by_cat=demand_frac_by_cat,
+    segments=segments
 )
 # -----------------------------------------------------------------------------------------------
 
@@ -214,7 +216,8 @@ def demand_generation(dp_loc_array, track_error, hurr_cat, t, inputs):
             )
         demand_by_track = max(1e-9, 1 - diff_y / inputs.study_region_dist)
         # combined demand
-        demand[i] = demand_by_track * demand_by_time * demand_by_cat
+        demand[i] = (demand_by_track * demand_by_time * demand_by_cat) * (1 / inputs.segments) # Also scaling relative to different time intervals
+    # print("demand:", demand)
     return demand
 
 # -----------------------------------------------------------------------------------------------

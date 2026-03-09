@@ -9,10 +9,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from demand_gen_indep import new_in_sample
 
 class TwoStageSPModel:
-    def __init__(self, network_processor, demand_processor, num_sce):
+    def __init__(self, network_processor, demand_processor, num_sce, num_sce_mean=None):
         self.network_processor = network_processor  # Store network data
         self.demand_processor = demand_processor  # Store demand data
         self.num_sce = num_sce  # Use full scenarios for other models
+        self.num_sce_mean = num_sce_mean # Deterministic mean value RH
         self.fixed_flow = {} # Initialize fixed_flow for use across RH-related functions
 
     def ext_model(self, is_mvp=False, model_version=1):
@@ -280,6 +281,8 @@ class TwoStageSPModel:
 
         # Fix each I[i, r, t] to its corresponding value using equality constraints
         for (i, r, t), val in fixed_I_irt.items():
+            if abs(val) < 1e-5:
+                val = 0
             model.addConstr(I_vars[i, r, t] == val, name=f"fix_I_{i}_{r}_{t}")
 
         # Solve the model
@@ -289,6 +292,7 @@ class TwoStageSPModel:
         if model.status == GRB.OPTIMAL:
             return model.objVal
         else:
+            model.write("non_optimal_model.lp")
             print(f"[Warning] Model not optimal. Status: {model.status}")
             return float("inf")
 
@@ -633,6 +637,11 @@ class TwoStageSPModel:
         # Check solution status
         if model.status != GRB.OPTIMAL:
             print(f"Warning: Optimization ended with status {model.status}")
+            if model.status == GRB.INFEASIBLE:
+                model.computeIIS()
+                model.write("conflict.ilp")     # Only conflicting constraints
+                model.write("debug_model.lp")   # Full LP model
+                print("Wrote conflict.ilp and debug_model.lp")
             exit(0)
 
         # Extract objective value
@@ -847,11 +856,11 @@ class TwoStageSPModel:
         # Transportation cost
         transport_cost = sum(P[s] * sum(m_ij[i][j] * variable_values["f"][(i, j, r, t_bar, s)] for i in range(V) for j in range(V) for r in range(R) if (i, j) in A) for s in sce)
 
-        total = penalty_cost + proc_cost + transport_cost
+        # total = penalty_cost + proc_cost + transport_cost
 
-        print(f"Cost at t_bar={t_bar} = {total:.2f}")
+        # print(f"Cost at t_bar={t_bar} = {total:.2f}")
 
-        return total
+        return penalty_cost, proc_cost, transport_cost
 
     def calculate_cost_terminal(self, variable_values, t_L):
         """
@@ -897,7 +906,14 @@ class TwoStageSPModel:
 
         nbOS = demand_processor.nbOS
         T = network_processor.T
+        V = network_processor.V
         t_L = network_processor.t_L
+        V0 = self.network_processor.V0
+        R = self.network_processor.R
+        A = self.network_processor.A
+        p_i = self.network_processor.p_i
+        cost_ir = self.network_processor.cost_ir
+        m_ij = self.network_processor.m_ij
 
         # Ensure PoD location info is loaded (used for post-landfall PoD demand)
         if not hasattr(demand_processor, "pod_info_df"):
@@ -907,14 +923,21 @@ class TwoStageSPModel:
         OS_paths_df = pd.read_csv(sample_paths)
         OS_paths = OS_paths_df.values
         total_costs = np.zeros(nbOS)  # Total cost for each sample path
+        penalty_costs = np.zeros(nbOS) # Penalty cost for each sample path
+        proc_costs = np.zeros(nbOS) # Procurement cost for each sample path
+        transport_costs = np.zeros(nbOS) # Transportation cost for each sample path
 
         for k in range(nbOS):
-            print("Sample path=", k)
+            # print("Sample path=", k)
             sample_path_row = OS_paths[k]  # Example: sample_path_row[t_bar] gives the hurricane's realized state at t_bar
             self.fixed_flow = {}
             t_bar = 0
             sol = {}  # Initial state
             cost_k = 0  # Total cost for sample path k
+            # Different types of cost for sample path k
+            penalty_k = 0
+            proc_k = 0
+            transport_k = 0
 
             # Rolling loop over time steps
             while t_bar <= t_L:
@@ -928,57 +951,67 @@ class TwoStageSPModel:
 
                 # Generate multiple in-sample scenario paths starting from the current time step t_bar and realized hurricane state s_t.
                 # Each scenario is a full trajectory of future hurricane states (track error, intensity) used to simulate uncertainty from t_bar onward.
-                in_sample_paths = new_in_sample(t_bar, s_t, self.num_sce)
-                # print("in_sample_paths:", in_sample_paths)
-
+                if self.num_sce_mean is not None: # Deterministic mean value RH
+                    in_sample_paths = new_in_sample(t_bar, s_t, self.num_sce_mean)
+                else:
+                    in_sample_paths = new_in_sample(t_bar, s_t, self.num_sce)
+                
+                original_num_sce = self.demand_processor.num_sce
+                # print("original num sce:", original_num_sce)
+                if self.num_sce_mean is not None:
+                    self.demand_processor.num_sce = self.num_sce_mean
+                    # print("temporary num sce:", self.demand_processor.num_sce)
+                
                 # Generate the demand at t_bar + 1 to t_L based on the realized state of the hurricane at t_bar
                 demand_processor.generate_future_demand(t_bar, t_L, network_processor, in_sample_paths, solution_method=4)  
 
                 demand_processor.generate_post_landfall_demand(t_L, in_sample_paths, network_processor, solution_method=4)
 
-                # # Print for debugging
-                # if t_bar == 9: 
-                #     print("Current demand:")         
-                #     for i in range(network_processor.V):
-                #         demand_val = self.demand_processor.d_its[(i, t_bar)]
-                #         print(f"d_{i},{t_bar} = {demand_val}")
+                # Deterministic mean value RH
+                self.demand_processor.num_sce = original_num_sce
+                # print("back to original:", self.demand_processor.num_sce)
 
-                #     print("Future demand:") 
-                #     for s in range(self.num_sce):
-                #         for t in range(t_bar + 1, t_L + 1):
-                #             for i in range(network_processor.V):
-                #                 val = self.demand_processor.d_its[(i, t, s)]
-                #                 if val > 1e-6:
-                #                     print(f"d_{i},{t},{s} = {val}")
-
-                #     print("Post landfall demand:") 
-                #     for s in range(self.num_sce):
-                #         for t in network_processor.T_Aft:
-                #             for i in network_processor.V3:
-                #                 val = self.demand_processor.d_its[(i, t, s)]
-                #                 # if abs(val) > 1e-6:
-                #                 print(f"d_{i},{t},{s} = {val}")
+                # Collapse future scenario demand to mean (keep current t_bar demand as is)
+                if self.num_sce_mean is not None:
+                    # Average for t = t_bar+1 ... T-1, for each i
+                    for t in range(t_bar + 1, T):
+                        for i in range(V):
+                            vals = [demand_processor.d_its[(i, t, s)] for s in range(self.num_sce_mean)]
+                            demand_processor.d_its[(i, t, 0)] = float(np.mean(vals))
+                
+                # if self.num_sce_mean is not None:
+                #     print("\n--- Demand used in model ---")
+                #     for t in range(t_bar, T):
+                #         print(f"\nt = {t}")
+                #         for i in range(network_processor.V):
+                #             if t == t_bar:
+                #                 val = demand_processor.d_its[(i, t)]
+                #             else:
+                #                 val = demand_processor.d_its[(i, t, 0)]
+                #             print(f"  i={i}, d = {val}")
+                # exit(0)
 
                 if t_bar < t_L:
                     # Build the model for current roll
                     model, I, U, S, f = self.RH_model_creator(t_bar, sol)
-                    # if t_bar == 8:
-                    #     model.write(f"RH_model_t{t_bar}.lp")
                     
                     # Solve the model
                     obj_val, variable_values = self.RH_model_solver(model, {"I": I, "U": U, "S": S, "f": f})           
 
-                    cost_k += self.calculate_cost_rh(variable_values, t_bar)
+                    penalty_pre, proc_pre, trans_pre = self.calculate_cost_rh(variable_values, t_bar)  
+                    penalty_k += penalty_pre
+                    proc_k += proc_pre
+                    transport_k += trans_pre 
+                    
+                    cost_k += penalty_pre + proc_pre + trans_pre
 
                     # Save fixed flows (departed up to and including current t_bar) for the realized scenario only
                     for (i, j, r, t, s), val in variable_values["f"].items():
                         if t == t_bar:
-                            self.fixed_flow[(i, j, r, t)] = val
-                
-                    # # Print for debugging        
-                    # for (i, j, r, t, s), val in sorted(self.fixed_flow.items()):
-                    #     if abs(val) > 1e-6:
-                    #         print(f"f_{i},{j},{r},{t},{s} = {val}")
+                            if abs(val) < 1e-6:
+                                self.fixed_flow[(i, j, r, t)] = 0
+                            else:    
+                                self.fixed_flow[(i, j, r, t)] = val
                 
                     # Update the rolling state for next time step
                     sol = self.RH_sol_creator(variable_values, t_bar)
@@ -989,23 +1022,34 @@ class TwoStageSPModel:
                 else:
                     # Create the terminal deterministic model from t_L to T
                     terminal_model, I_term, U_term, S_term, f_term = self.RH_terminal_model(sol)
-                    # model.write(f"RH_model_t{t_bar}.lp")
 
                     # Solve the terminal deterministic model from t_L to T
                     obj_term, var_term = self.RH_model_solver(terminal_model, {"I": I_term, "U": U_term, "S": S_term, "f": f_term})
+                    
+                    penalty_post = sum(p_i[i] * var_term["U"][(i, t)] for i in range(V) for t in range(t_L, T))
+                    proc_post = sum(cost_ir[i][r] * var_term["f"][(i, j, r, t)] for i in V0 for j in range(V) if (i, j) in A for r in range(R) for t in range(t_L, T))
+                    trans_post = sum(m_ij[i][j] * var_term["f"][(i, j, r, t)] for i in range(V) for j in range(V) if (i, j) in A for r in range(R) for t in range(t_L, T))
 
-                    print(f"Cost at t_bar={t_bar} = {obj_term:.2f}")
+                    penalty_k += penalty_post
+                    proc_k += proc_post
+                    transport_k += trans_post
 
-                    # The terminal model covers the entire remaining horizon from t_L to T
-                    cost_k += obj_term
-                    # cost_k += self.calculate_cost_terminal(var_term, t_L)
+                    cost_k += penalty_post + proc_post + trans_post
+
                     t_bar += 1
 
             # Save the cost for this sample path
             total_costs[k] = cost_k
+            penalty_costs[k] = penalty_k
+            proc_costs[k] = proc_k
+            transport_costs[k] = transport_k
             # Print the total cost for this path
             print(f"Total cost for sample path {k} = {cost_k:.2f}")
 
+        avg_penalty = np.mean(penalty_costs)
+        avg_proc = np.mean(proc_costs)
+        avg_transport = np.mean(transport_costs)
+        
         mean_cost = np.mean(total_costs)
         std_cost = np.std(total_costs, ddof=1)
         ci_low = mean_cost - 1.96 * std_cost / np.sqrt(nbOS)
@@ -1015,12 +1059,18 @@ class TwoStageSPModel:
         print(f"μ ± 1.96*σ/√NS = {mean_cost:.2f} ± {CI:.2f}")
         print(f"95% Confidence Interval = [{ci_low:.2f}, {ci_high:.2f}]")
 
+        print(f"\nAverage Cost Breakdown:")
+        print(f"Average Penalty Cost = {avg_penalty:.2f}")
+        print(f"Average Procurement Cost = {avg_proc:.2f}")
+        print(f"Average Transportation Cost = {avg_transport:.2f}")
+
         end_time = time.time()
         total_time = end_time - start_time
         print(f"Total Execution Time for RH Evaluation: {total_time:.2f} seconds")
 
         return mean_cost, total_costs, total_time
     
+    '''
     def RH_evaluation_new(self, sample_paths, demand_processor, network_processor):
         """
         Evaluates the rolling horizon model over multiple out-of-sample sample paths.
@@ -1329,7 +1379,8 @@ class TwoStageSPModel:
 
         # Return the cost for this sample path
         return cost_k
-    
+    '''
+
     ### First-stage
     def master_problem(self, thetaLB, model_version=1):
 

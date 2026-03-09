@@ -14,7 +14,7 @@ std_pod: 1
 
 # For sensitivity analysis
 MULTIPLIER_PENALTY_COST: 1 # Penalty cost multiplier
-MULTIPLIER_INIT_INV: 1 # Initial inventory multiplier
+MULTIPLIER_INIT_INV: 0.25 # Initial inventory multiplier
 MULTIPLIER_ARC: 1 # Arc capacity multiplier
 
 # Benders config
@@ -23,7 +23,7 @@ EPS: 1e-5
 
 # Multi-Stage
 smallest_trans_prob: 0.0005
-CUTVIOL: 0.0001
+CUTVIOL: 0.00001
 MAX_ITER: 100000
 STALL: 200
 CUTVIOL_MAXITER: 100000
