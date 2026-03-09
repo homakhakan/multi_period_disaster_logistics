@@ -44,7 +44,8 @@ class MultiStageSPModel:
         self.T1 = network_processor.T1
         self.t_ij = network_processor.t_ij
         self.t_L = network_processor.t_L 
-        self.tt_max = network_processor.tt_max
+        if self.travel_time == 2:
+            self.tt_max = network_processor.tt_max
         self.alpha = 0.1 # Watch hardcoding
         self.mc_ins = mc_ins
 

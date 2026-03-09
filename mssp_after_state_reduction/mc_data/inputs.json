@@ -28,11 +28,11 @@
     "description": "Lead-time to observe the first demand (evacuation window)."
   },
   "segments": {
-    "value": 3,
+    "value": 2,
     "description": "Number of subdivisions inside each 12-hour period."
   },
   "n_states_at_terminal": {
-    "value": 10,
+    "value": 5,
     "description": "Target maximum number of discretized states at terminal period."
   },
   "num_scen": {
