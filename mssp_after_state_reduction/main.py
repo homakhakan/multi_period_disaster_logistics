@@ -12,7 +12,7 @@ import copy
 import json
 import math
 
-# === My own project modules ===
+# My project modules
 from demand_gen_indep import new_in_sample, demand_generation, inputs
 from demand_data import DemandData
 from network_data import NetworkData
@@ -38,6 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("-tilda", "--t_tilda", type=int, help="Waiting time (t_tilda) before starting the Wait-and-See (WS) 2SSP model") 
     parser.add_argument("-nsm", "--num_sce_mean", type=int, default=None, help="Number of scenarios used to compute mean demand for deterministic RH (only used when -sm 4 and -ns 1)") # Deterministic mean value RH
+    parser.add_argument("-dep", action="store_true", help="Use deprivation-cost multistage model in solution method 6")
 
     args = parser.parse_args()
 
@@ -94,7 +95,6 @@ if __name__ == "__main__":
     print(f"Time periods: {network_processor.T}")
     print(f"Time Before Landfall: {network_processor.T_Bef}")
     print(f"Time After Landfall: {network_processor.T_Aft}")
-    # print(f"Scenario probabilities: {demand_processor.P}")
 
     # Run only the selected model
     if args.solution_method == 1:
@@ -265,8 +265,7 @@ if __name__ == "__main__":
         )
 
     elif args.solution_method == 6:
-        # import cProfile
-        # import pstats
+
         print("\nReading data...")  
         # Print the output
         print(f"All locations: {network_processor.V}")
@@ -278,7 +277,13 @@ if __name__ == "__main__":
         print(f"Time periods: {network_processor.T}")
         print(f"Time Before Landfall: {network_processor.T_Bef}")
         print(f"Time After Landfall: {network_processor.T_Aft}")
-        from multistage_model import MultiStageSPModel 
+
+        if args.dep:
+            print("Running SDDP with deprivation buckets")
+            from msp_dep_buckets import MultiStageSPModel
+        else:
+            from multistage_model import MultiStageSPModel 
+        
         from msp_helper import create_OSpaths
 
         # Initialize model instance
@@ -316,17 +321,9 @@ if __name__ == "__main__":
         exit(0)
         '''
         
-        # # === PROFILE SDDP TRAINING ===
-        # print(f"\n[PROFILING] SDDP Training in process ...")
-        # prof_train = cProfile.Profile()
-        # prof_train.enable()
-        
         # Run the SDDP algorithm
         print(f"\nSDDP Training in process ...")
         LB, train_time, total_iter = sddp_model_instance.solve_sddp()
-
-        # prof_train.disable()
-        # prof_train.dump_stats("profile_sddp_train.prof")
 
         print(f"\nSDDP Training Complete")
         print(f"Iterations: {total_iter}")

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 class MultiStageSPModel:
-    def __init__(self, network_processor, demand_processor, params, travel_time, last_stage):
+    def __init__(self, network_processor, demand_processor, params, travel_time, last_stage, mc_ins):
         self.network_processor = network_processor
         self.demand_processor = demand_processor
         self.params = params
@@ -46,6 +46,7 @@ class MultiStageSPModel:
         self.t_L = network_processor.t_L 
         self.tt_max = network_processor.tt_max
         self.alpha = 0.1 # Watch hardcoding
+        self.mc_ins = mc_ins
 
         # Define delta indicator
         if self.travel_time == 2:
@@ -60,7 +61,8 @@ class MultiStageSPModel:
             self.delta = set(self.delta)
 
         # Markov chain data
-        transition_path = "Data/pi_mssp_d_ST_track_15.json"
+        suffix = self.mc_ins.replace("mc_", "")  # "60_2_5"
+        transition_path = os.path.join("mc_output", self.mc_ins, f"Florence_combined_mc_p_matrix_{suffix}.json")
         self.transition_dict = msp_helper.load_transition_dict(transition_path)
         self.nodeLists = msp_helper.build_node_lists(self.transition_dict)
 
@@ -759,9 +761,15 @@ class MultiStageSPModel:
                     if t < self.t_L:
                         for i in range(self.V):
                             for r in range(self.R):
-                                I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
+                                if abs(self.I[t, k_t][i, r].x) < 1e-6:
+                                    I_prev[i, r, t] = 0
+                                else:
+                                    I_prev[i, r, t] = self.I[t, k_t][i, r].x # Extract inventory level (state var)
                             for kk in range(t + 1):
-                                U_prev[i, t, kk] = self.U[t, k_t][i, kk].x # Extract demand shortage (state var)
+                                if abs(self.U[t, k_t][i, kk].x) < 1e-6:
+                                    U_prev[i, t, kk] = 0
+                                else:
+                                    U_prev[i, t, kk] = self.U[t, k_t][i, kk].x # Extract demand shortage (state var)
 
                         if self.travel_time == 2: 
                             for j in range(self.V):
@@ -1546,7 +1554,7 @@ class MultiStageSPModel:
             print("\nAverage unmet demand by bucket:")
             print(np.mean(unmet_by_bucket, axis=0))
 
-            print("\nAverage satisfied demand by bucket`:")
+            print("\nAverage satisfied demand by bucket:")
             print(np.mean(satisfied_by_bucket, axis=0))
 
             avg_unmet_bucket = unmet_by_bucket.mean(axis=0)
@@ -1574,7 +1582,7 @@ class MultiStageSPModel:
             plt.title('Average Satisfied Demand Over Time')
             plt.grid(True)
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"avg_satisfied_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_satisfied_demand_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
 
@@ -1588,7 +1596,7 @@ class MultiStageSPModel:
             plt.title('Average Inventory at Shelters Over Time')
             plt.grid(True)
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"avg_inevntory_shelter_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_inevntory_shelter_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
             
@@ -1601,7 +1609,7 @@ class MultiStageSPModel:
             plt.title('Average Inventory at PoDs Over Time')
             plt.grid(True)
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"avg_inevntory_pod_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}).png")
+            save_path = os.path.join("Heat map", f"avg_inevntory_pod_over_time (penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}).png")
             plt.savefig(save_path, dpi=300)
             plt.close()
             
@@ -1651,7 +1659,7 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"inventory_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
+            save_path = os.path.join("Heat map", f"inventory_penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}.png")
             plt.savefig(save_path, dpi=300)
             
             # Plotting unmet demand heat map
@@ -1672,7 +1680,7 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"unmet_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
+            save_path = os.path.join("Heat map", f"unmet_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}.png")
             plt.savefig(save_path, dpi=300)
 
             # Plotting satisfied demand heat map
@@ -1693,7 +1701,7 @@ class MultiStageSPModel:
             plt.ylabel("Intensity")
             plt.gca().invert_yaxis()
             plt.tight_layout()
-            save_path = os.path.join("Heat map", f"satisfied_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_trans_m={self.network_processor.multiplier_trans_cost:g}.png")
+            save_path = os.path.join("Heat map", f"satisfied_demand_penalty_m={self.network_processor.multiplier_penalty_cost:g}_inv_m={self.network_processor.multiplier_init_inv:g}.png")
             plt.savefig(save_path, dpi=300)
             # =====================================================================
 

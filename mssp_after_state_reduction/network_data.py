@@ -25,6 +25,7 @@ class NetworkData:
         self.base_cap = int(params["BASE_CAP"])
         # print("T1:", self.T1)
         # print("T2:", self.T2)
+        # print("t_period:", self.tperiod)
         # exit(0)
 
         # Load file paths
@@ -173,12 +174,6 @@ class NetworkData:
                 for j in range(self.V):
                     if i != j and self.durationMatrix[i][j] == 0:
                         self.t_ij[i][j] = 0
-
-        # elif travel_time == 2:
-        #     # Load fixed t_ij travel time matrix from file (travel times are more than 1 time period)
-        #     # Formulation for normalizing: t_ij = Ceiling((d_ij/d_max)*T_max).  We supposed T_max=3
-        #     self.t_ij = pd.read_csv(f"Data/travel_time_matrix_{self.instance_version}.csv").values.tolist()
-        #     self.tt_max = np.max(self.t_ij) # Extract the maximum travel time (without delay) to later use in sddp for saving some computational time
 
         elif travel_time == 2:
             # Multi-period travel time computed from real duration matrix
