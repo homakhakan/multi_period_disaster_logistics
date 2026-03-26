@@ -1381,16 +1381,15 @@ class MultiStageSPModel:
                         # Deprivation: update unmet-demand buckets (age + add new demand + serve oldest-first)
                         if t > 0:
                             U_bucket[:, 1:t+1] = U_bucket[:, 0:t]   # Age unmet demand: bucket k+1 <- previous bucket k
-                        U_bucket[:, 0] = 0.0                        # Clear bucket 1 to store only newly arrived demand at time t
 
                         # Add newly realized demand to bucket 1
                         for i in range(self.V):
-                            U_bucket[i, 0] += demand_real[i] # Total demand arriving at node i at time t
+                            U_bucket[i, 0] = demand_real[i] # Total demand arriving at node i at time t
 
                         # Apply serving oldest-first (largest k to smallest)
                         for i in range(self.V):
                             served = S_real[i]
-                            for kk in range(t, -1, -1):
+                            for kk in range(t+1, -1, -1): # iterates from oldest demand
                                 if served <= 1e-9:
                                     break
                                 take = min(served, U_bucket[i, kk])
@@ -1398,17 +1397,11 @@ class MultiStageSPModel:
                                 served -= take
 
                         # Deprivation: accumulate penalty cost using reconstructed buckets
-                        if t < self.t_L:
+                        if t <= self.t_L:
                             for i in self.V1:
                                 for kk in range(t + 1):
                                     penalty_cost_pre_with_dep[s] += ((1 + self.alpha * kk) * self.p_i[i] * U_bucket[i, kk])
-
-                        elif t == self.t_L:
-                            for i in self.V1:
-                                for kk in range(t + 1):
-                                    penalty_cost_pre_with_dep[s] += ((1 + self.alpha * kk) * self.p_i[i] * U_bucket[i, kk])
-
-                        
+             
                         # For post-landfall deprivation
                         if t == self.t_L:
                             post_landfall_demand = self.demand_processor.msp_post_landfall_demand(k_t, self.network_processor)
@@ -1421,7 +1414,6 @@ class MultiStageSPModel:
 
                                 # age buckets
                                 U_bucket[:, 1:t_post+1] = U_bucket[:, 0:t_post]
-                                U_bucket[:, 0] = 0.0
 
                                 # add post-landfall demand
                                 for i in range(self.V):
@@ -1438,7 +1430,7 @@ class MultiStageSPModel:
                                         served -= take
 
                                 # accumulate POST deprivation penalty
-                                for i in self.V3:
+                                for i in self.V1 + self.V3:
                                     for kk in range(t_post + 1):
                                         penalty_cost_post_with_dep[s] += ((1 + self.alpha * kk) * self.p_i[i] * U_bucket[i, kk])
 
