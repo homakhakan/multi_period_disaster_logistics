@@ -175,6 +175,9 @@ class NetworkData:
                     if i != j and self.durationMatrix[i][j] == 0:
                         self.t_ij[i][j] = 0
 
+            # print(self.t_ij)
+            # exit(0)
+
         elif travel_time == 2:
             # Multi-period travel time computed from real duration matrix
             # durationMatrix is in seconds
@@ -240,5 +243,94 @@ class NetworkData:
             self.K_ijt.setdefault(i, {})[j] = {}
             for t in range(self.T):
                 self.K_ijt[i][j][t] = self.base_cap * self.multiplier_arc
+
+
+    def expand_network(self):
+        """Expand the original network by replacing each arc with travel time 
+        greater than one period with a chain of auxiliary waypoint nodes and 
+        unit-travel-time arcs."""
+
+        exp_arcs = [(i, j, self.t_ij[i][j]) for (i, j) in self.A if self.t_ij[i][j] > 1]
+        # for i, j, tt in exp_arcs:
+        #     print(f"({i}, {j}) -> travel time = {tt}")
+
+        # Initialize expanded network structures from the original network
+        self.A_exp = set(self.A)
+        self.V_exp = self.V
+        self.df_V_exp = self.df_V.copy()
+        self.m_ij_exp = np.array(self.m_ij, dtype=float).copy()
+        
+        # Remove each long arc from the expanded arc set before replacing it with unit-time arcs
+        self.aux_map = {}   # Mapping auxiliary node IDs to readable labels for debugging
+        for i, j, tt in exp_arcs:
+            self.A_exp.remove((i, j))
+            # print(f"Removed long arc ({i}, {j}) with travel time {tt}")
+
+            # Create auxiliary waypoint nodes for this long arc
+            aux_nodes = []
+            for k in range(1, tt):
+                aux_idx = self.V_exp
+                self.V_exp += 1
+                aux_nodes.append(aux_idx)
+                self.aux_map[aux_idx] = f"aux_{i}_{j}_{k}"   # Mapping auxiliary node IDs to readable labels for debugging
+
+                # Add auxiliary node to expanded location dataframe
+                aux_row = pd.Series(index=self.df_V.columns, dtype=object)
+                aux_row["Index"] = aux_idx
+                aux_row["Type"] = "Aux"
+                
+                # Set NaN fields
+                aux_row["Facility"] = np.nan
+                aux_row["Address"] = np.nan
+                aux_row["Lat"] = np.nan
+                aux_row["Long"] = np.nan
+                aux_row["Water PC"] = np.nan
+                aux_row["Food PC"] = np.nan
+
+                # Set zero fields
+                aux_row["Water StartInv"] = 0
+                aux_row["Food StartInv"] = 0
+                aux_row["Cot StartInv"] = 0
+                aux_row["Blanket StartInv"] = 0
+                aux_row["TruckStart"] = 0
+                aux_row["TruckDelay"] = 0
+                aux_row["P_i"] = 0
+
+                self.df_V_exp.loc[aux_idx] = aux_row
+            
+            # print(f"Auxiliary nodes for ({i}, {j}): {aux_nodes}")
+            # print(f"Auxiliary labels: {[self.aux_map[a] for a in aux_nodes]}")
+
+            # Create replacement chain: i -> aux_1 -> ... -> aux_last -> j
+            chain_nodes = [i] + aux_nodes + [j]
+            for a, b in zip(chain_nodes[:-1], chain_nodes[1:]):
+                self.A_exp.add((a, b))
+            # print(f"Replacement chain for ({i}, {j}): {chain_nodes}")
+
+        # Build expanded unit-travel-time matrix
+        self.t_ij_exp = np.zeros((self.V_exp, self.V_exp), dtype=int)
+        for i, j in self.A_exp:
+            self.t_ij_exp[i][j] = 1
+
+
+
+
+        
+        exit(0)
+
+
+
+
+
+
+
+
+
+        # Initialize expanded arc capacity dictionary
+        self.K_ijt_exp = {}
+        for (i, j) in self.A_exp:
+            self.K_ijt_exp.setdefault(i, {})[j] = {}
+            for t in range(self.T):
+                self.K_ijt_exp[i][j][t] = self.base_cap
 
 

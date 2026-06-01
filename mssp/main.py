@@ -51,6 +51,7 @@ if __name__ == "__main__":
     network_processor.commodity = args.commodity
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters(args.travel_time)
+    network_processor.expand_network()
 
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
