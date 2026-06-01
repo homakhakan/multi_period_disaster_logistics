@@ -206,10 +206,7 @@ class NetworkData:
 
         # Travel cost between locations
         self.m_ij = [[(self.distanceMatrix[i][j] * self.fuel) for j in range(len(self.df_V))] for i in range(len(self.df_V))]
-    
-        # # Convert m_ij into a DataFrame with row and column labels
-        # df_mij = pd.DataFrame(self.m_ij, columns=self.df_V.index, index=self.df_V.index)
-        # df_mij.to_csv("m_ij_matrix.csv", index=True)
+        # print(self.m_ij)
         # exit(0)
 
         # Procurement cost per resource
@@ -258,7 +255,6 @@ class NetworkData:
         self.A_exp = set(self.A)
         self.V_exp = self.V
         self.df_V_exp = self.df_V.copy()
-        self.m_ij_exp = np.array(self.m_ij, dtype=float).copy()
         
         # Remove each long arc from the expanded arc set before replacing it with unit-time arcs
         self.aux_map = {}   # Mapping auxiliary node IDs to readable labels for debugging
@@ -312,19 +308,21 @@ class NetworkData:
         for i, j in self.A_exp:
             self.t_ij_exp[i][j] = 1
 
-
-
-
+        # Build expanded transportation cost matrix
+        old_m_ij = np.array(self.m_ij, dtype=float)
+        self.m_ij_exp = np.zeros((self.V_exp, self.V_exp), dtype=float)
+        # Keep original costs for arcs that were not expanded
+        for i, j in self.A:
+            if (i, j) in self.A_exp:
+                self.m_ij_exp[i][j] = old_m_ij[i][j]
         
-        exit(0)
-
-
-
-
-
-
-
-
+        # Assign original long-arc cost to the first arc of each replacement chain
+        for i, j, tt in exp_arcs:
+            aux_nodes = [aux_idx for aux_idx, label in self.aux_map.items() if label.startswith(f"aux_{i}_{j}_")]  # Find auxiliary nodes belonging to this original arc
+            aux_nodes = sorted(aux_nodes, key=lambda a: int(self.aux_map[a].split("_")[-1]))                       # Sort auxiliary nodes in travel order
+            chain_nodes = [i] + aux_nodes + [j]                                                                    # Reconstruct full replacement chain
+            first_arc = (chain_nodes[0], chain_nodes[1])                                                           # Identify the first arc in the chain
+            self.m_ij_exp[first_arc[0]][first_arc[1]] = old_m_ij[i][j]                                             # Put original long-arc cost on first replacement arc
 
         # Initialize expanded arc capacity dictionary
         self.K_ijt_exp = {}
@@ -333,4 +331,4 @@ class NetworkData:
             for t in range(self.T):
                 self.K_ijt_exp[i][j][t] = self.base_cap
 
-
+        exit(0)
