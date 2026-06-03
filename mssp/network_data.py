@@ -331,4 +331,25 @@ class NetworkData:
             for t in range(self.T):
                 self.K_ijt_exp[i][j][t] = self.base_cap
 
-        exit(0)
+        self.V_aux = list(self.aux_map.keys())
+
+        # Expand initial inventory for auxiliary nodes
+        self.I_ir0_exp = [row.copy() for row in self.I_ir0]    # Copy original inventories
+        for aux_idx in self.V_aux:
+            self.I_ir0_exp.append([0 for _ in range(self.R)])  # Adds one zero-inventory row for each auxiliary node
+
+        # Expand penalty cost for auxiliary nodes
+        self.p_i_exp = list(self.p_i)
+        for aux_idx in self.V_aux:
+            self.p_i_exp.append(0)
+
+        # Replace original network objects with expanded network objects
+        self.V = self.V_exp
+        self.A = self.A_exp
+        self.df_V = self.df_V_exp
+        self.t_ij = self.t_ij_exp
+        self.m_ij = self.m_ij_exp
+        self.K_ijt = self.K_ijt_exp
+        self.I_ir0 = self.I_ir0_exp
+        self.p_i = self.p_i_exp
+

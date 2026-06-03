@@ -49,6 +49,30 @@ class MultiStageSPModel:
         self.alpha = 0.1 # Watch hardcoding
         self.mc_ins = mc_ins
 
+        print("\n========== NETWORK SUMMARY ==========")
+
+        print(f"V  (total nodes)      : {self.V}")
+        print(f"V0 (Suppliers)        : {self.V0}")
+        print(f"V1                    : {self.V1}")
+        print(f"V2                    : {self.V2}")
+        print(f"V3                    : {self.V3}")
+
+        print(f"\nNumber of arcs        : {len(self.A)}")
+
+        print(f"\nt_ij shape            : {self.t_ij.shape}")
+        print(self.t_ij)
+
+        print(f"\nm_ij dimensions       : {len(self.m_ij)} x {len(self.m_ij[0])}")
+
+        print(f"\nNumber of capacity arcs in K_ijt : {sum(len(self.K_ijt[i]) for i in self.K_ijt)}")
+
+        if hasattr(network_processor, "V_aux"):
+            print(f"\nAuxiliary nodes       : {network_processor.V_aux}")
+            print(f"Number of aux nodes   : {len(network_processor.V_aux)}")
+
+        print("=====================================\n")
+        # exit(0)
+
         # Define delta indicator
         if self.travel_time == 2:
             self.delta = []        

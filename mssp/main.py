@@ -39,6 +39,7 @@ if __name__ == "__main__":
     parser.add_argument("-tilda", "--t_tilda", type=int, help="Waiting time (t_tilda) before starting the Wait-and-See (WS) 2SSP model") 
     parser.add_argument("-nsm", "--num_sce_mean", type=int, default=None, help="Number of scenarios used to compute mean demand for deterministic RH (only used when -sm 4 and -ns 1)") # Deterministic mean value RH
     parser.add_argument("-dep", action="store_true", help="Use deprivation-cost multistage model in solution method 6")
+    parser.add_argument("-ex", "--exp_net", action="store_true", help="Activate reviewer experiment: expand multi-period travel arcs using auxiliary waypoint nodes.")
 
     args = parser.parse_args()
 
@@ -51,7 +52,8 @@ if __name__ == "__main__":
     network_processor.commodity = args.commodity
     network_processor.define_sets() # Now call the methods using this instance
     network_processor.define_parameters(args.travel_time)
-    network_processor.expand_network()
+    if args.exp_net:
+        network_processor.expand_network()
 
     demand_processor = DemandData(args.num_sce, args.instance_version, args.nbOS, params) # Create an instance of the DemandData class
 
