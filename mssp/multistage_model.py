@@ -409,7 +409,6 @@ class MultiStageSPModel:
         for i in range(self.V):
             for t in range(self.t_L, self.T):
                 S[i, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"S_{i}_{t}")
-
         
         f = {}      
         for i in range(self.V):
@@ -751,7 +750,7 @@ class MultiStageSPModel:
                         self.in_transit_update_constr1[t, k_t][j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
                         self.in_transit_update_constr2[t, k_t][j, r, t_prime].setAttr(GRB.Attr.RHS, rhs_val)
     
-    """
+    # """
     def update_rhs_time1(self, t, k_t, I_prev, U_prev):
         # Update right-hand sides of the (t , k_t) model constraints before optimization.
         
@@ -768,7 +767,7 @@ class MultiStageSPModel:
             for r in range(self.R):
                 self.inventory_update_constr1[t, k_t][i, r].setAttr(GRB.Attr.RHS, I_prev[i, r, t - 1])
                 self.inventory_update_constr2[t, k_t][i, r].setAttr(GRB.Attr.RHS, I_prev[i, r, t - 1])
-    """
+    # """
 
     def backward_pass(self, I_prev, U_prev, f1_prev, thetaval, state_path):
         
@@ -930,7 +929,7 @@ class MultiStageSPModel:
 
         return cutviolFlag
     
-    """
+    # """
     def backward_pass_time1(self, I_prev, U_prev, thetaval, state_path):
                 
         cutviolFlag = False
@@ -951,6 +950,7 @@ class MultiStageSPModel:
                 self.m[t, k_state].optimize()
                 if self.m[t, k_state].status != gp.GRB.OPTIMAL:
                     print("Error in Backward Pass")
+                    self.m[t, k_state].write(f"Error_Backward_t{t}_k{k_state}.lp")
                     print(f"Model in stage = {t} and state = {k_state}, in backward pass is {self.m[t, k_state].status}")
                     sys.exit(0)
                 else:
@@ -958,16 +958,11 @@ class MultiStageSPModel:
  
                     for i in range(self.V):
                         dual_demand1[k_state, i] = self.demand_shortage_constr1[t, k_state][i].pi # <= 0 negative
-
-                    for i in range(self.V):
                         dual_demand2[k_state, i] = self.demand_shortage_constr2[t, k_state][i].pi # >= 0 positive
 
                     for i in range(self.V):
                         for r in range(self.R):
                             dual_inventory1[k_state, i, r] = self.inventory_update_constr1[t, k_state][i, r].pi # <= 0 negative
-                
-                    for i in range(self.V):
-                        for r in range(self.R):
                             dual_inventory2[k_state, i, r] = self.inventory_update_constr2[t, k_state][i, r].pi # >= 0 positive
                             
             # Solving all stage-(t-1) problems and generate cuts/valid inequalities
@@ -1001,22 +996,22 @@ class MultiStageSPModel:
                         for i in range(self.V):
                             lam1 = dual_demand1[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)] 
                             cutcoef_U1[i] += lam1                                                 # Coefficient
-                            cut_rhs += lam1 * U_prev[i][t-1]                                          # RHS
+                            cut_rhs += lam1 * U_prev[i, t-1]                                          # RHS
 
                             lam2 = dual_demand2[k_state, i] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                             cutcoef_U2[i] += lam2                                                 # Coefficient
-                            cut_rhs += lam2 * U_prev[i][t-1]                                           # RHS
+                            cut_rhs += lam2 * U_prev[i, t-1]                                           # RHS
 
                         # Inventory-balance constraints
                         for i in range(self.V):
                             for r in range(self.R):
                                 lam1 = dual_inventory1[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                 cutcoef_I1[i][r] += lam1                                          # Coefficient
-                                cut_rhs += lam1 * I_prev[i][r][t-1]                                   # RHS
+                                cut_rhs += lam1 * I_prev[i, r, t-1]                                   # RHS
 
                                 lam2 = dual_inventory2[k_state, i, r] * self.transition_dict[str(t-1)][str(n)][str(k_state)]
                                 cutcoef_I2[i][r] += lam2                                          # Coefficient
-                                cut_rhs += lam2 * I_prev[i][r][t-1]                                    # RHS
+                                cut_rhs += lam2 * I_prev[i, r, t-1]                                    # RHS
               
                 # Add the cut
                 # Pay attention to the signs of the terms on the left ahdn side and sign of cut_rhs on thr right hand side          
@@ -1028,7 +1023,7 @@ class MultiStageSPModel:
                                         >= Qvalue - cut_rhs, name=f"OptCut_{t-1}_{n}")
                
         return cutviolFlag
-    """
+    # """
 
     # Train model
     def solve_sddp(self):
@@ -1103,21 +1098,20 @@ class MultiStageSPModel:
             
             print(f"Iter {iter}: LB = {lb:.2f}, Cut Violated = {cut_violFlag}")
 
-            # Save LB history to CSV
-            import csv
-            output_path = "SDDP_LB_history.csv"
-            with open(output_path, mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(["Iteration", "LB", "ElapsedTimeSec"])
-                for it, (lb_val, t_sec) in enumerate(zip(LB, elapsed_times), start=1):
-                    writer.writerow([it, lb_val, t_sec])
+        # Save files only once after training
+        import csv
 
-            # Save hourly relative gap to CSV
-            with open("SDDP_Hourly_Gap.csv", mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(["Hour", "Relative Gap"])
-                for hr, gap in hourly_gaps:
-                    writer.writerow([hr, gap])
+        with open("SDDP_LB_history.csv", mode="w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Iteration", "LB", "ElapsedTimeSec"])
+            for it, (lb_val, t_sec) in enumerate(zip(LB, elapsed_times), start=1):
+                writer.writerow([it, lb_val, t_sec])
+
+        with open("SDDP_Hourly_Gap.csv", mode="w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Hour", "Relative Gap"])
+            for hr, gap in hourly_gaps:
+                writer.writerow([hr, gap])
 
         # To be able to write them in excel file
         self.LB = LB

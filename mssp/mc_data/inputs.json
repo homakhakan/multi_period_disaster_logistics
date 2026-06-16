@@ -20,7 +20,7 @@
     "description": "Coordinate reference system used for GeoDataFrames."
   },
   "H": {
-    "value": 60,
+    "value": 120,
     "description": "Forecast horizon in hours (must be multiple of 12)."
   },
   "demand_lead_time": {
@@ -28,7 +28,7 @@
     "description": "Lead-time to observe the first demand (evacuation window)."
   },
   "segments": {
-    "value": 2,
+    "value": 1,
     "description": "Number of subdivisions inside each 12-hour period."
   },
   "n_states_at_terminal": {
