@@ -303,10 +303,35 @@ class NetworkData:
                 self.A_exp.add((a, b))
             # print(f"Replacement chain for ({i}, {j}): {chain_nodes}")
 
-        # Build expanded unit-travel-time matrix
+        # # Build expanded unit-travel-time matrix
+        # self.t_ij_exp = np.zeros((self.V_exp, self.V_exp), dtype=int)
+        # for i, j in self.A_exp:
+        #     self.t_ij_exp[i][j] = 1
+
+        # Build expanded travel-time matrix (temporary hack)
         self.t_ij_exp = np.zeros((self.V_exp, self.V_exp), dtype=int)
-        for i, j in self.A_exp:
-            self.t_ij_exp[i][j] = 1
+
+        # First assign t=1 to arcs that were not expanded
+        for i, j in self.A:
+            if (i, j) in self.A_exp:
+                self.t_ij_exp[i][j] = 1
+
+        # For expanded chains:
+        # all internal arcs get t=0,
+        # only the last arc gets t=1
+        for i, j, tt in exp_arcs:
+
+            aux_nodes = [aux_idx for aux_idx, label in self.aux_map.items() if label.startswith(f"aux_{i}_{j}_")]
+            aux_nodes = sorted(aux_nodes, key=lambda a: int(self.aux_map[a].split("_")[-1]))
+            chain_nodes = [i] + aux_nodes + [j]
+
+            # Set all arcs to t=0
+            for a, b in zip(chain_nodes[:-1], chain_nodes[1:]):
+                self.t_ij_exp[a][b] = 0
+
+            # Last arc gets t=1
+            a_last, b_last = chain_nodes[-2], chain_nodes[-1]
+            self.t_ij_exp[a_last][b_last] = 1
 
         # Build expanded transportation cost matrix
         old_m_ij = np.array(self.m_ij, dtype=float)

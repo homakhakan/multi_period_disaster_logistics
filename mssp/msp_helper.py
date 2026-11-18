@@ -57,7 +57,7 @@ def create_OSpaths(nbOS, T_Bef, k_init, transition_dict, output_file):
     Create out-of-sample (OOS) paths using Markov transitions.
     """
     rr = nbOS
-    cc = len(T_Bef)
+    cc = len(T_Bef) + 1
     print("rr = ", rr)
     print("cc = ", cc)
 
@@ -71,7 +71,7 @@ def create_OSpaths(nbOS, T_Bef, k_init, transition_dict, output_file):
     # Generate paths using MC_sample
     for s in range(rr):
         k_t = k_init
-        for t in range(len(T_Bef)):
+        for t in range(len(T_Bef)+1):
             if t > 0:
                 k_t = MC_sample(t-1, k_t, transition_dict)
                 OS_paths[s, t] = k_t

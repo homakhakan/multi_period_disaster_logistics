@@ -1230,6 +1230,7 @@ def demand_generation(dp_loc_array, track_error, hurr_cat, t):
         (t < T_exteneded - tau)
         ):
         return demand
+
     # 1. demand by intensity
     demand_by_cat = demand_by_hurr_cat(hurr_cat)
     # 2. demand by time (W.R.T. the forward speed towards study region)
